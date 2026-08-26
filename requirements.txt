@@ -1,0 +1,22 @@
+# ==============================================================================
+# THƯ VIỆN CHO DỰ ÁN TINYML EDGE AI FACE RECOGNITION (ESP32-S3 N16R8)
+# ==============================================================================
+
+# 1. Phía Laptop Host & Xử lý Thị giác máy tính
+opencv-python>=4.8.0
+numpy>=1.24.0
+pyserial>=3.5           # Giao tiếp Serial tốc độ cao với ESP32-S3
+pillow>=10.0.0
+mediapipe>=0.10.0       # Nhận diện Face Mesh 468 điểm mốc chống nhiễu cao cấp
+
+# 2. Huấn luyện & Lượng tử hóa Mô hình TinyML (Training Pipeline)
+torch>=2.0.0            # Hoặc TensorFlow tùy lựa chọn framework
+torchvision>=0.15.0
+tensorflow>=2.14.0      # Dùng để xuất TFLite và lượng tử hóa INT8 (PTQ/QAT)
+tqdm>=4.65.0
+matplotlib>=3.7.0
+
+# 3. Giao diện & Cơ sở dữ liệu
+streamlit>=1.28.0
+pandas>=2.0.0
+openpyxl>=3.1.0         # Xuất báo cáo Excel
