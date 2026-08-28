@@ -32,7 +32,7 @@ class UnifiedFaceDetector:
     YUNET_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
     YUNET_FILE = "face_detection_yunet_2023mar.onnx"
 
-    def __init__(self, target_size=(64, 64), prefer_mediapipe=True, conf_threshold=0.75):
+    def __init__(self, target_size=(64, 64), prefer_mediapipe=True, conf_threshold=0.85):
         self.target_size = target_size
         self.conf_threshold = conf_threshold
         self.mode = "NONE"
@@ -177,13 +177,13 @@ class UnifiedFaceDetector:
                 # -------------------------------------------------------------
                 # HỆ THỐNG LỌC NHIỄU THÔNG MINH (ANTI-FALSE-POSITIVE HEURISTICS)
                 # -------------------------------------------------------------
-                # 1. Ép ngưỡng tin cậy (Confidence) tối thiểu lên 0.85 
-                if conf < max(self.conf_threshold, 0.85):
+                # 1. Ép ngưỡng tin cậy (Confidence) tối thiểu
+                if conf < self.conf_threshold:
                     continue
                     
-                # 2. Tỉ lệ khung hình (Aspect Ratio): Mặt người tỷ lệ Rộng/Cao thường 0.65 -> 1.25
+                # 2. Tỉ lệ khung hình (Aspect Ratio): Nới lỏng hơn (0.50 -> 1.50)
                 aspect_ratio = bw / (bh + 1e-5)
-                if aspect_ratio < 0.60 or aspect_ratio > 1.25:
+                if aspect_ratio < 0.50 or aspect_ratio > 1.50:
                     continue
                     
                 # 3. Phân bố điểm mốc sinh trắc (Biometric Landmarks Distribution)
@@ -191,9 +191,9 @@ class UnifiedFaceDetector:
                 lx, ly = int(det[6]), int(det[7])  # Mắt trái
                 mx, my = int(det[8]), int(det[9])  # Mũi
                 
-                # Khoảng cách 2 mắt thường chiếm 30% - 60% chiều rộng khuôn mặt
+                # Khoảng cách 2 mắt (nới lỏng: 15% - 85%)
                 eye_dist = np.sqrt((rx - lx)**2 + (ry - ly)**2)
-                if eye_dist < 0.25 * bw or eye_dist > 0.65 * bw:
+                if eye_dist < 0.15 * bw or eye_dist > 0.85 * bw:
                     continue
                     
                 # Mũi phải nằm dưới 2 mắt

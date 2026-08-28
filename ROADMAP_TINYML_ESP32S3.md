@@ -1,15 +1,19 @@
 # 🚀 BẢN THIẾT KẾ & ROADMAP DỰ ÁN TINYML EDGE AI FACE RECOGNITION (ESP32-S3 N16R8)
 
-> **Cập nhật:** Đã đồng bộ 100% với kiến trúc thực tế của hệ thống (Hardware-in-the-Loop, Màn hình LCD1602 + Còi chíp Buzzer, Mạng Ghost-TinyFace 64x64 INT8, Tối ưu hóa bộ nhớ SRAM nội bộ, Tracking Lock và Bộ lọc hình thái sinh trắc học chống nhận diện ảo).
+> **Cập nhật:** Đã cập nhật định hướng phát triển từ Hardware-in-the-Loop sang **Hệ thống AI Độc Lập Hoàn Toàn (Standalone Edge AI)**. ESP32-S3 sẽ tự quản lý Camera, Màn hình TFT, Bộ lọc khuôn mặt và tự động suy luận AI mà không cần cắm vào máy tính.
 
 ---
 
 ## 📌 1. TỔNG QUAN & TẦM NHÌN THỰC TẾ CỦA HỆ THỐNG
 
 ### 🎯 Mục tiêu & Mô hình triển khai:
-Hệ thống là một thiết bị **AIoT Điểm danh Khuôn mặt Thông minh Chuẩn Edge AI**, hoạt động theo mô hình **Hardware-in-the-Loop (HIL) / Edge AI Coprocessor**:
-* **Host Laptop (Python / OpenCV)**: Đóng vai trò là Mắt quan sát (Webcam), Bộ tiền xử lý hình ảnh (OpenCV YuNet + Biometric Alignment) và Giao diện điều khiển (HUD / Database SQLite).
-* **Edge MCU (ESP32-S3-DevKitC N16R8)**: Đóng vai trò là Não bộ AI độc lập (TinyML Inference Core) + Hệ thống báo hiệu phần cứng tại chỗ (Màn hình LCD 1602 hiển thị tên/kết quả + Còi chíp Buzzer phát âm thanh thông báo).
+Hệ thống là một thiết bị **AIoT Điểm danh Khuôn mặt Thông minh Chuẩn Edge AI**, hoạt động theo mô hình **Độc Lập Hoàn Toàn (Standalone Edge AI)** (Chỉ cần cắm nguồn điện là tự hoạt động):
+* **Host Laptop (Python)**: Đóng vai trò là **Công cụ Phát triển & Đào tạo (Training & Prototyping)**: Dùng để chụp ảnh lấy mẫu ban đầu, huấn luyện lại mạng nơ-ron (Ghost-TinyFace) và biên dịch Firmware.
+* **Edge MCU (ESP32-S3-DevKitC N16R8)**: Đóng vai trò là Não bộ AI độc lập toàn diện:
+  * Tự thu nhận hình ảnh từ **Module Camera (OV2640/OV5640)**.
+  * Tự chạy mô hình phát hiện khuôn mặt hạng nhẹ và nhận diện khuôn mặt (TinyML Inference Core).
+  * Hiển thị giao diện UI và khung nhận diện trực tiếp lên **Màn hình TFT LCD SPI**.
+  * Lưu trữ dữ liệu điểm danh độc lập vào thẻ nhớ MicroSD.
 
 ### 🌟 Các nguyên tắc cốt lõi đã đạt được:
 1. **Tự chủ hoàn toàn mô hình AI (Full In-House TinyML)**: Tự thiết kế kiến trúc mạng nơ-ron tích chập `Ghost-TinyFace` (dựa trên các khối Ghost Bottleneck), huấn luyện với hàm mất mát ArcFace và Chưng cất tri thức (Knowledge Distillation), lượng tử hóa Full INT8 tương thích hoàn hảo với tập lệnh Vector của ESP32-S3.
@@ -34,33 +38,24 @@ Hệ thống là một thiết bị **AIoT Điểm danh Khuôn mặt Thông minh
 
 ---
 
-## 🏗️ 3. SƠ ĐỒ LUỒNG DỮ LIỆU TOÀN HỆ THỐNG (DATA FLOW)
+## 🏗️ 3. SƠ ĐỒ LUỒNG DỮ LIỆU TOÀN HỆ THỐNG MỚI (STANDALONE DATA FLOW)
 
 ```mermaid
 graph TD
-    subgraph LAPTOP ["💻 Phía Laptop (Python Host & Camera)"]
-        A[Webcam 720p/1080p] -->|Video Stream| B(YuNet Face Detector)
-        B -->|Bộ lọc Sinh trắc học: Tỉ lệ 0.6-1.25, Mắt 25-65%| C{Là khuôn mặt thật?}
-        C -- Không (Bao tải/Đồ vật) --> D[Bỏ qua / Loại bỏ]
-        C -- Đúng khuôn mặt --> E{Đã nhận diện trước đó?}
-        E -- Đang Lock (Người chưa rời đi) --> F[Giữ nhãn Xanh, Không gửi Serial]
-        E -- Chưa nhận diện / Người mới --> G(Crop & Align 64x64 Grayscale)
-        G -->|Đóng gói Packet UART 921600 bps| H[Gửi xuống ESP32 qua COM Port]
-        S[Nhận JSON Kết quả từ ESP32] --> T[Cập nhật HUD Display & Ghi SQLite]
-    end
-
-    subgraph ESP32S3 ["🧠 Phía ESP32-S3 (Edge AI Core & Peripherals)"]
-        H -->|Nhận Packet 4096 bytes| I[Core 1: Serial FSM Parser]
-        I -->|Đẩy vào FreeRTOS Queue| J[Queue Frame Buffer]
-        J -->|Core 0 kích hoạt| K[Core 0: TFLite Micro Inference]
-        K -->|Tính toán trên 136KB/200KB SRAM| L(Trích xuất Embedding 128-D)
-        L -->|So khớp Cosine Similarity| M{Similarity >= 0.40?}
-        M -- Đúng (Matched) --> N1[LCD: Tên + Độ khớp % + DIEM DANH XONG]
-        N1 --> N2[Buzzer: Bíp 2 tiếng ngắn]
-        M -- Sai (Unknown) --> P1[LCD: CANH BAO NGUOI LA]
-        P1 --> P2[Buzzer: Bíp 1 tiếng dài]
-        M --> Q[Đóng gói JSON: matched, name, sim, infer_ms]
-        Q -->|Gửi ngược lên Laptop| S
+    subgraph ESP32S3 ["🧠 ESP32-S3 Độc Lập (Camera + TFT + AI Core)"]
+        A[Camera Module OV2640] -->|Video Stream DVP| B(Core 1: Thu thập Frame buffer)
+        B -->|Tiền xử lý ảnh| C[Core 1: Face Detection Model MTMN]
+        C --> D{Có khuôn mặt?}
+        D -- Không --> E[TFT: Vẽ luồng Video bình thường]
+        D -- Có --> F(Core 1: Crop & Resize 64x64 Grayscale)
+        F -->|Đẩy vào FreeRTOS Queue| G[Core 0: TFLite Micro Inference]
+        G -->|Tính toán trên SRAM| H(Trích xuất Embedding 128-D)
+        H -->|So khớp Cosine Similarity| I{Similarity >= 0.40?}
+        I -- Đúng (Matched) --> J1[TFT: Bounding Box Xanh lá + Tên người]
+        J1 --> J2[Buzzer: Bíp 2 tiếng ngắn]
+        J2 --> J3[Lưu lịch sử xuống thẻ MicroSD]
+        I -- Sai (Unknown) --> K1[TFT: Bounding Box Đỏ + Khách Lạ]
+        K1 --> K2[Buzzer: Bíp 1 tiếng dài]
     end
 ```
 
@@ -94,21 +89,27 @@ graph TD
 
 ---
 
-## 🗺️ 5. TIẾN ĐỘ THỰC HIỆN DỰ ÁN (ROADMAP HIỆN TẠI)
+## 🗺️ 5. TIẾN ĐỘ THỰC HIỆN DỰ ÁN (ROADMAP HIỆN TẠI VÀ TƯƠNG LAI)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────┐
 │ GIAI ĐOẠN 1: Giao tiếp Serial Tốc độ cao 921600 bps & UART FSM Parser      [HOÀN THÀNH]  │
 ├──────────────────────────────────────────────────────────────────────────────────────────┤
-│ GIAI ĐOẠN 2: Pipeline YuNet, Biometric Landmarks & Bộ lọc Heuristics        [HOÀN THÀNH]  │
+│ GIAI ĐOẠN 2: Pipeline YuNet, Biometric Landmarks & Bộ lọc Heuristics       [HOÀN THÀNH]  │
 ├──────────────────────────────────────────────────────────────────────────────────────────┤
 │ GIAI ĐOẠN 3: Kiến trúc Ghost-TinyFace 64x64, ArcFace Loss & Distillation   [HOÀN THÀNH]  │
 ├──────────────────────────────────────────────────────────────────────────────────────────┤
-│ GIAI ĐOẠN 4: Full INT8 Quantization & Xuất Header C++ model_data.h          [HOÀN THÀNH]  │
+│ GIAI ĐOẠN 4: Full INT8 Quantization & Xuất Header C++ model_data.h         [HOÀN THÀNH]  │
 ├──────────────────────────────────────────────────────────────────────────────────────────┤
-│ GIAI ĐOẠN 5: Firmware FreeRTOS Dual-Core, Tối ưu 136KB/200KB SRAM & LCD/Buzzer [HOÀN THÀNH] │
+│ GIAI ĐOẠN 5: Firmware FreeRTOS Dual-Core, Tối ưu 136KB SRAM & LCD/Buzzer   [HOÀN THÀNH]  │
 ├──────────────────────────────────────────────────────────────────────────────────────────┤
-│ GIAI ĐOẠN 6: Tracking Lock, HUD Realtime Dashboard & Đo đạc Đánh giá        [ĐANG TRIỂN KHAI] │
+│ GIAI ĐOẠN 6: Tracking Lock, HUD Realtime Dashboard & Đo đạc Đánh giá       [HOÀN THÀNH]  │
+├──────────────────────────────────────────────────────────────────────────────────────────┤
+│ GIAI ĐOẠN 7: Nâng cấp độc lập - Gắn Camera OV2640 & Màn hình màu TFT SPI   [KẾ HOẠCH MỚI]│
+├──────────────────────────────────────────────────────────────────────────────────────────┤
+│ GIAI ĐOẠN 8: Tích hợp mô hình Face Detection (esp-dl) trực tiếp lên ESP32  [KẾ HOẠCH MỚI]│
+├──────────────────────────────────────────────────────────────────────────────────────────┤
+│ GIAI ĐOẠN 9: Viết C++ Crop/Resize ảnh và ghi Database điểm danh ra MicroSD [KẾ HOẠCH MỚI]│
 └──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -161,51 +162,74 @@ PROJECT_5_DIEM_DANH_KHUON_MAT/
 
 ---
 
-## 🔌 7. SƠ ĐỒ ĐẤU NỐI NGOẠI VI TRÊN ESP32-S3
+## 🔌 7. ĐỊNH HƯỚNG PHẦN CỨNG MỚI (MÔ HÌNH ĐỘC LẬP)
 
-```
-                ┌───────────────────────────────────────┐
-                │          ESP32-S3 DEVKITC             │
-                │                                       │
-                │   GPIO 4  ────────────> LCD RS (Chân 4)
-                │   GPIO 5  ────────────> LCD EN (Chân 6)
-                │   GPIO 6  ────────────> LCD D4 (Chân 11)
-                │   GPIO 7  ────────────> LCD D5 (Chân 12)
-                │   GPIO 15 ────────────> LCD D6 (Chân 13)
-                │   GPIO 16 ────────────> LCD D7 (Chân 14)
-                │                                       │
-                │   GPIO 17 ────────────> Còi Buzzer (+)│
-                │                                       │
-                │   5V / VIN ───────────> LCD VDD, LCD A│
-                │   GND     ────────────> LCD VSS, LCD K│
-                └───────────────────────────────────────┘
-```
-*(Chi tiết từng lỗ cắm trên Bo test Breadboard xem tại file [`HUONG_DAN_DAU_NOI_LCD1602_ESP32S3.md`](file:///d:/PROJECT_5_DIEM_DANH_KHUON_MAT/HUONG_DAN_DAU_NOI_LCD1602_ESP32S3.md)).*
+Sơ đồ đấu nối hiện tại (LCD1602 + Còi) chỉ là bước đệm. Đối với Giai đoạn 7-9 để chạy độc lập, phần cứng dự kiến sẽ chuyển sang:
+
+*   **ESP32-S3-EYE (Khuyến nghị):** Bảng mạch có sẵn Camera (OV2640) và Màn hình TFT (ST7789), rất phù hợp để làm thiết bị hoàn chỉnh và tối ưu.
+*   **Hoặc Tự Build (Custom Board):**
+    *   Sử dụng Module Camera **OV2640** (giao tiếp DVP: D0-D7, VSYNC, HREF, PCLK).
+    *   Sử dụng Màn hình **TFT LCD SPI** (như ILI9341 hoặc ST7789) để hiện HUD và Bounding Box có màu sắc thay cho LCD1602 đơn điệu.
+    *   Tích hợp Module **MicroSD Card** giao tiếp SPI để lưu file `attendance_log.csv`.
+    *   Vẫn giữ lại Còi **Buzzer** để phát âm thanh.
 
 ---
 
-## 🐍 8. HƯỚNG DẪN VẬN HÀNH TOÀN HỆ THỐNG
+## ⚡ 8. BẢNG TRA CỨU CÂU LỆNH NHANH (QUICK COMMAND CHEATSHEET)
 
-### Bước 1: Nạp Firmware cho ESP32-S3
+> **💡 Mẹo:** Mở Terminal / Anaconda Prompt, chuyển vào thư mục dự án và kích hoạt môi trường ảo trước khi chạy các lệnh dưới đây:
+> ```bash
+> d:
+> cd d:\PROJECT_5_DIEM_DANH_KHUON_MAT
+> conda activate projet_5
+> ```
+
+---
+
+### 1️⃣ Khởi động Hệ thống Điểm danh Khuôn mặt Thời gian thực:V
+Lệnh đọc webcam, lọc ảo, gửi ảnh xuống ESP32-S3 và hiển thị giao diện HUD:
+```bash
+python host_laptop/main.py
+```
+
+---
+
+### 2️⃣ Chụp ảnh & Đăng ký Khuôn mặt Người mới (Face Enrollment Tool):
+Lệnh mở webcam thu thập dữ liệu khuôn mặt đã canh chỉnh chuẩn $64 \times 64$:
+* Nhập Tên (không dấu, viết liền, ví dụ: `Nguyen_Van_A`).
+* Nhấn phím **`C`** để Chụp ảnh (chụp từ 30 - 50 tấm đa dạng góc độ).
+* Nhấn **`Q`** hoặc **`ESC`** để thoát và lưu vào `data/registered_faces/`.
+```bash
+python host_laptop/enroll_tool.py
+```
+
+---
+
+### 3️⃣ Cập nhật Cơ sở dữ liệu & Xuất C++ Header (1-Click Update):
+Lệnh tự động trích xuất lại đặc trưng khuôn mặt (embeddings) và xuất ra file C++ sau khi đăng ký người mới:
+```bash
+python training_tinyml/update_face_database.py
+```
+*(Sau khi chạy xong lệnh này, chỉ cần mở Arduino IDE và bấm nút **Upload** nạp lại vào ESP32-S3).*
+
+---
+
+### 4️⃣ Đánh giá Định lượng & Kiểm tra Ma trận Nhầm lẫn (Evaluation & Benchmark):
+Lệnh kiểm tra độ tương đồng nội bộ (Intra-class) và độ phân cách chéo giữa các người dùng (Inter-class):
+```bash
+python training_tinyml/evaluate_model.py
+```
+
+---
+
+## 🔧 9. HƯỚNG DẪN NẠP FIRMWARE TRÊN ARDUINO IDE
+
 1. Mở phần mềm **Arduino IDE**.
 2. Mở file [`firmware_esp32/src/tinyml_recognizer/tinyml_recognizer.ino`](file:///d:/PROJECT_5_DIEM_DANH_KHUON_MAT/firmware_esp32/src/tinyml_recognizer/tinyml_recognizer.ino).
 3. Chọn bo mạch **ESP32S3 Dev Module**, cấu hình:
    * **PSRAM**: *OPI PSRAM* (hoặc *Enabled*).
    * **Flash Size**: *16MB (128Mb)*.
    * **Partition Scheme**: *16M Flash (3MB APP/9.9MB FATFS)* hoặc *Huge APP (3MB No OTA)*.
-4. Bấm **Upload** và chờ báo nạp thành công 100%.
+   * **USB CDC On Boot**: *Enabled* (hoặc *Disabled* tùy cổng COM nạp).
+4. Bấm **Upload** và chờ nạp thành công 100%.
 
-### Bước 2: Khởi chạy Giao diện Giám sát trên Laptop
-Mở Terminal / Anaconda Prompt và chạy:
-
-```bash
-# 1. Chuyển vào thư mục dự án
-d:
-cd d:\PROJECT_5_DIEM_DANH_KHUON_MAT
-
-# 2. Kích hoạt môi trường ảo
-conda activate projet_5
-
-# 3. Khởi động hệ thống điểm danh
-python host_laptop/main.py
-```
