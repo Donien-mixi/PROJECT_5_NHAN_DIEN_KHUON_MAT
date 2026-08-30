@@ -236,35 +236,26 @@ class UnifiedFaceDetector:
 
     def align_and_crop(self, frame, face_info):
         """
-        Căn chỉnh khuôn mặt bằng phép biến đổi tương đồng Affine (Similarity Transform)
-        chuẩn InsightFace / ArcFace đưa về kích thước 96x96.
+        Cắt khuôn mặt cho vuông và căn giữa giống hệt firmware ESP32.
+        Không dùng Affine Transform để đảm bảo đồng nhất thuật toán.
         """
         if face_info is None:
             return None, None, None
             
-        landmarks_5 = face_info.get('landmarks_5')
-        if landmarks_5 is not None and len(landmarks_5) == 5:
-            src_pts = np.array(landmarks_5, dtype=np.float32)
-            
-            # Tính ma trận biến đổi Affine Similarity (xoay + tịnh tiến + co giãn đồng dạng)
-            ref_pts = REFERENCE_5_POINTS_64 if self.target_size == (64, 64) else REFERENCE_5_POINTS_96
-            M, inliers = cv2.estimateAffinePartial2D(src_pts, ref_pts)
-            
-            if M is not None:
-                # Thực hiện biến đổi trực tiếp toàn bộ khuôn mặt chuẩn xác đến từng pixel
-                face_aligned_bgr = cv2.warpAffine(
-                    frame, M, self.target_size, 
-                    flags=cv2.INTER_AREA, 
-                    borderMode=cv2.BORDER_REPLICATE
-                )
-                face_aligned_gray = cv2.cvtColor(face_aligned_bgr, cv2.COLOR_BGR2GRAY)
-                byte_data = face_aligned_gray.tobytes()
-                return face_aligned_bgr, face_aligned_gray, byte_data
-                
-        # Fallback crop nếu không có landmarks
-        x, y, w, h = face_info['bbox']
+        x, y, w, h = [int(v) for v in face_info['bbox']]
         img_h, img_w = frame.shape[:2]
-        crop = frame[max(0, y):min(img_h, y+h), max(0, x):min(img_w, x+w)]
+        
+        # Bắt buộc crop thành hình vuông, CĂN GIỮA giống hệt ESP32 firmware
+        size = max(w, h)
+        x_adj = x - (size - w) // 2
+        y_adj = y - (size - h) // 2
+        
+        box_x = max(0, x_adj)
+        box_y = max(0, y_adj)
+        box_w = min(size, img_w - box_x)
+        box_h = min(size, img_h - box_y)
+        
+        crop = frame[box_y:box_y+box_h, box_x:box_x+box_w]
         if crop.size == 0:
             return None, None, None
             

@@ -79,5 +79,45 @@ def quantize_to_int8():
     
     return tflite_path
 
+def generate_c_header(tflite_path):
+    print("\n[*] Đang chuyển đổi file .tflite thành C Header (model_data.h)...")
+    
+    current_dir = os.path.dirname(os.path.dirname(tflite_path))
+    colab_export_path = os.path.join(current_dir, "colab_exports", "model_data.h")
+    os.makedirs(os.path.dirname(colab_export_path), exist_ok=True)
+    
+    with open(tflite_path, "rb") as f:
+        tflite_data = f.read()
+        
+    c_content = (
+        "// File này được tạo tự động bởi quantize_qat_int8.py\n"
+        "#ifndef MODEL_DATA_H\n"
+        "#define MODEL_DATA_H\n\n"
+        "const unsigned char g_model_recognizer[] = {\n"
+    )
+    
+    # Format bytes as hex
+    hex_array = [f"0x{byte:02x}" for byte in tflite_data]
+    for i in range(0, len(hex_array), 12):
+        c_content += "    " + ", ".join(hex_array[i:i+12]) + ",\n"
+        
+    c_content += "};\n\n"
+    c_content += f"const int g_model_recognizer_len = {len(tflite_data)};\n\n"
+    c_content += "#endif // MODEL_DATA_H\n"
+
+    with open(colab_export_path, "w", encoding="utf-8") as f:
+        f.write(c_content)
+        
+    print(f"[+] Đã tạo thành công file C Header cho Colab tại:\n    👉 {colab_export_path}")
+        
+    # Copy sang firmware_esp32 nếu đang chạy ở máy tính local
+    esp32_path = os.path.join(os.path.dirname(current_dir), "firmware_esp32", "model_data.h")
+    if os.path.exists(os.path.dirname(esp32_path)):
+        with open(esp32_path, "w", encoding="utf-8") as f:
+            f.write(c_content)
+        print(f"[+] Đã copy file C Header nạp cho ESP32 tại:\n    👉 {esp32_path}")
+
 if __name__ == "__main__":
-    quantize_to_int8()
+    tflite_file = quantize_to_int8()
+    if tflite_file:
+        generate_c_header(tflite_file)

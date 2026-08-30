@@ -1,0 +1,189 @@
+--- HỆ THỐNG KHỞI ĐỘNG ---
+✅ Đã khởi tạo bộ nhớ Flash (SPIFFS) thành công.
+Đang khởi tạo Core 1 (Network & Image Decoding)...
+[NetDisplayTask] Bắt đầu setup_wifi_and_udp()...
+[AITask] Initializing models...
+Khoi tao Face Preprocessing & Detector (BlazeFace)...
+✅ Đã tạo AITask trên Core 0 thành công!
+Đã cấp phát 112KB PSRAM cho Frame Buffer.
+[Heartbeat] Dang cho ket noi Wi-Fi... (Uptime: 2 s)
+⚠️ Cảnh báo: Không đủ Internal SRAM cho BlazeFace! Đang chuyển sang PSRAM (chậm hơn)...
+
+[Wi-Fi] Bat dau ket noi toi SSID: Nghi
+Detector AllocateTensors() successful
+[BlazeFace] Arena size used: 1410896 bytes
+Khoi tao TFLite Micro Face Recognizer...
+❌ Cảnh báo: Không đủ Internal SRAM cho Recognizer (240KB)! Đang chuyển sang PSRAM (chậm hơn)...
+>>> TFLite Micro Model da nap thanh cong vao PSRAM!
+[AITask] Models ready.
+...
+[Wi-Fi] >>> KET NOI THANH CONG! <<<
+[Wi-Fi] IP cua ESP32: 192.168.1.70
+Listening on TCP port 12345
+[NetDisplayTask] Bắt đầu setup_image_decoder()...
+[NetDisplayTask] Vào vòng lặp chính...
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 4 s
+[NetTask] Client mới đã kết nối thành công!
+[AITask] Đã bắt được cờ is_new_frame_available = true!
+==========================================
+[AITask] Đã nhận tín hiệu ảnh mới. Bắt đầu chạy detect_face()...
+==========================================
+[AITask] Đã vào detect_face(). Chuẩn bị Bilinear Interpolation...
+[AITask] Bắt đầu gọi BlazeFace Invoke()...
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 6 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 8 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 10 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 12 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 14 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 16 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 18 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 20 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 22 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 24 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 26 s
+[AITask] BlazeFace Invoke() thành công!
+[BlazeFace RAW] dx:5.78 dy:-3.91 w:72.18 h:72.16 -> cx:0.733 cy:0.782 box_w:135.33 box_h:135.31
+[BlazeFace] Tìm thấy mặt! Score: 0.89 | Tọa độ: [108, 114, 132, 126]
+[AITask] detect_face() chạy xong! Thời gian: 21996 ms
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 28 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 30 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 32 s
+🔍 [AI] Frame hiện tại: Unknown (Độ tin cậy: 0.41)
+[AITask] Alive...
+[AITask] Đã bắt được cờ is_new_frame_available = true!
+==========================================
+[AITask] Đã nhận tín hiệu ảnh mới. Bắt đầu chạy detect_face()...
+==========================================
+[AITask] Đã vào detect_face(). Chuẩn bị Bilinear Interpolation...
+[AITask] Bắt đầu gọi BlazeFace Invoke()...
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 34 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 36 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 38 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 40 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 42 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 44 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 46 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 48 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 50 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 52 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 54 s
+[AITask] BlazeFace Invoke() thành công!
+[BlazeFace RAW] dx:1.57 dy:-2.15 w:69.49 h:69.48 -> cx:0.575 cy:0.671 box_w:133.57 box_h:133.54
+[BlazeFace] Tìm thấy mặt! Score: 0.94 | Tọa độ: [95, 109, 133, 131]
+[AITask] detect_face() chạy xong! Thời gian: 22197 ms
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 56 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 58 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 60 s
+🔍 [AI] Frame hiện tại: Unknown (Độ tin cậy: 0.45)
+[AITask] Alive...
+[AITask] Đã bắt được cờ is_new_frame_available = true!
+==========================================
+[AITask] Đã nhận tín hiệu ảnh mới. Bắt đầu chạy detect_face()...
+==========================================
+[AITask] Đã vào detect_face(). Chuẩn bị Bilinear Interpolation...
+[AITask] Bắt đầu gọi BlazeFace Invoke()...
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 62 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 64 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 66 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 68 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 70 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 72 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 74 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 76 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 78 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 80 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 82 s
+[AITask] BlazeFace Invoke() thành công!
+[BlazeFace RAW] dx:0.54 dy:-3.69 w:66.14 h:66.13 -> cx:0.567 cy:0.659 box_w:130.23 box_h:130.20
+[BlazeFace] Tìm thấy mặt! Score: 0.93 | Tọa độ: [88, 106, 130, 130]
+[AITask] detect_face() chạy xong! Thời gian: 22277 ms
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 84 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 86 s
+🔍 [AI] Frame hiện tại: Unknown (Độ tin cậy: 0.30)
+
+=========================================
+🚨 TỪ CHỐI: PHÁT HIỆN NGƯỜI LẠ!
+=========================================
+
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 88 s
+[AITask] Alive...
+[AITask] Đã bắt được cờ is_new_frame_available = true!
+==========================================
+[AITask] Đã nhận tín hiệu ảnh mới. Bắt đầu chạy detect_face()...
+==========================================
+[AITask] Đã vào detect_face(). Chuẩn bị Bilinear Interpolation...
+[AITask] Bắt đầu gọi BlazeFace Invoke()...
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 90 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 92 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 94 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 96 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 98 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 100 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 102 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 104 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 106 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 108 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 110 s
+[AITask] BlazeFace Invoke() thành công!
+[BlazeFace RAW] dx:-8.05 dy:-0.36 w:59.73 h:59.72 -> cx:0.500 cy:0.310 box_w:111.99 box_h:111.98
+[BlazeFace] Tìm thấy mặt! Score: 0.88 | Tọa độ: [63, 18, 111, 111]
+[AITask] detect_face() chạy xong! Thời gian: 22005 ms
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 112 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 114 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 116 s
+🔍 [AI] Frame hiện tại: Trinh_Dong_Nhien_17_01_06 (Độ tin cậy: 0.79)
+[AITask] Alive...
+[AITask] Đã bắt được cờ is_new_frame_available = true!
+==========================================
+[AITask] Đã nhận tín hiệu ảnh mới. Bắt đầu chạy detect_face()...
+==========================================
+[AITask] Đã vào detect_face(). Chuẩn bị Bilinear Interpolation...
+[AITask] Bắt đầu gọi BlazeFace Invoke()...
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 118 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 120 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 122 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 124 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 126 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 128 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 130 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 132 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 134 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 136 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 138 s
+[AITask] BlazeFace Invoke() thành công!
+[BlazeFace RAW] dx:1.50 dy:5.22 w:57.36 h:57.35 -> cx:0.574 cy:0.478 box_w:110.44 box_h:110.42
+[BlazeFace] Tìm thấy mặt! Score: 0.92 | Tọa độ: [70, 33, 110, 110]
+[AITask] detect_face() chạy xong! Thời gian: 22269 ms
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 140 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 142 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 144 s
+🔍 [AI] Frame hiện tại: Trinh_Dong_Nhien_17_01_06 (Độ tin cậy: 0.85)
+[AITask] Alive...
+[AITask] Đã bắt được cờ is_new_frame_available = true!
+==========================================
+[AITask] Đã nhận tín hiệu ảnh mới. Bắt đầu chạy detect_face()...
+==========================================
+[AITask] Đã vào detect_face(). Chuẩn bị Bilinear Interpolation...
+[AITask] Bắt đầu gọi BlazeFace Invoke()...
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 146 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 148 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 150 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 152 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 154 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 156 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 158 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 160 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 162 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 164 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 166 s
+[AITask] BlazeFace Invoke() thành công!
+[BlazeFace RAW] dx:-2.61 dy:3.95 w:57.84 h:57.83 -> cx:0.542 cy:0.468 box_w:109.74 box_h:109.73
+[BlazeFace] Tìm thấy mặt! Score: 0.93 | Tọa độ: [72, 41, 109, 109]
+[AITask] detect_face() chạy xong! Thời gian: 22323 ms
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 168 s
+[Heartbeat] ESP32 dang chay | IP: 192.168.1.70 | UDP Port: 12345 | Uptime: 170 s
+🔍 [AI] Frame hiện tại: Trinh_Dong_Nhien_17_01_06 (Độ tin cậy: 0.87)
+
+=========================================
+🎉 ĐIỂM DANH THÀNH CÔNG: Trinh_Dong_Nhien_17_01_06
+=========================================

@@ -167,8 +167,12 @@ class FaceDatasetLoader:
         img = image_np.copy()
         h, w = img.shape
         
+        # 0. Lật ngang ngẫu nhiên (Horizontal Flip)
+        if np.random.rand() > 0.5:
+            img = cv2.flip(img, 1)
+
         # 1. Xoay và Scale/Tịnh tiến nhẹ (Affine Transform giữ nguyên tâm mắt)
-        angle = np.random.uniform(-8.0, 8.0)
+        angle = np.random.uniform(-15.0, 15.0)
         scale = np.random.uniform(0.94, 1.06)
         tx = np.random.uniform(-2.0, 2.0)
         ty = np.random.uniform(-2.0, 2.0)
