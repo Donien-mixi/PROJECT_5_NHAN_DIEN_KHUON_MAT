@@ -6,7 +6,7 @@ import numpy as np
 # Thêm thư mục gốc vào PYTHONPATH
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from host_laptop.detector.yunet_detector import UnifiedFaceDetector
+from host_laptop.detector.blazeface_esp32 import UnifiedFaceDetector
 
 def enroll_user():
     print("==================================================================")

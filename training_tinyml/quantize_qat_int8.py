@@ -30,10 +30,14 @@ def quantize_to_int8():
     model.load_weights(model_path)
 
     # 2. Xây dựng Representative Dataset để hiệu chuẩn dải giá trị Quantization
-    data_dir = os.path.join(os.path.dirname(current_dir), "data", "registered_faces")
-    img_files = glob.glob(os.path.join(data_dir, "*", "*.jpg")) + glob.glob(os.path.join(data_dir, "*", "*.png"))
+    # CỰC KỲ QUAN TRỌNG: Phải dùng tập ảnh local (registered_faces) để bộ lượng tử hóa
+    # học được dải sáng/tối và độ tương phản đặc trưng của Camera trên ESP32.
+    base_dir = os.path.dirname(current_dir)
+    reg_dir = os.path.join(base_dir, "data", "registered_faces")
     
-    print(f"[*] Tìm thấy {len(img_files)} ảnh làm mẫu hiệu chuẩn (Representative Dataset)...")
+    img_files = glob.glob(os.path.join(reg_dir, "*", "*.jpg")) + glob.glob(os.path.join(reg_dir, "*", "*.png"))
+    
+    print(f"[*] Tìm thấy {len(img_files)} ảnh thực tế từ Camera để hiệu chuẩn (Representative Dataset)...")
 
     def representative_dataset_gen():
         for path in img_files:

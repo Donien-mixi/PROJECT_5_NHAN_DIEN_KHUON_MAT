@@ -8,7 +8,7 @@ import os
 
 # Thêm đường dẫn để import được module detector
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from detector.yunet_detector import FaceDetector
+from detector.blazeface_esp32 import UnifiedFaceDetector as FaceDetector
 
 def stream_camera(ip, port, resolution=(240, 240), quality=50):
     # Cấu hình Socket TCP

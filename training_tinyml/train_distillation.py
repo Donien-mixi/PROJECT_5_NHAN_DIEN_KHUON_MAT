@@ -35,7 +35,6 @@ from tensorflow.keras import optimizers
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from training_tinyml.models.ghost_tinyface import build_tinyface_ghost
-from training_tinyml.dataset_loader import FaceDatasetLoader
 
 
 # ==============================================================================
@@ -149,90 +148,6 @@ def compute_hard_negative_loss(student_embeddings, identity_labels, margin=0.4):
     return loss
 
 
-# ==============================================================================
-# BƯỚC MỞ RỘNG: FINE-TUNE ĐỂ KHẮC PHỤC OVERLAP
-# ==============================================================================
-def finetune_on_registered_faces(model, data_dir, epochs=30, batch_size=16):
-    """
-    Sử dụng Triplet Loss để đẩy xa các khuôn mặt đăng ký cụ thể,
-    đảm bảo mô hình phân biệt rạch ròi 3 người dùng, không bị nhầm lẫn.
-    """
-    print("\n" + "="*70)
-    print("🚀 BƯỚC 8: FINE-TUNE ĐẶC VỤ TỪ DỮ LIỆU CÁ NHÂN (CHỐNG NHẦM LẪN)")
-    print("="*70)
-    
-    if not os.path.exists(data_dir):
-        print(f"[-] Không tìm thấy thư mục {data_dir}. Bỏ qua bước Fine-tuning.")
-        return model
-        
-    identities = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
-    if len(identities) < 2:
-        print("[-] Cần ít nhất 2 người để fine-tune phân biệt. Bỏ qua.")
-        return model
-        
-    print(f"[+] Tìm thấy {len(identities)} người dùng: {identities}")
-    
-    all_images = []
-    all_labels = []
-    
-    for idx, name in enumerate(identities):
-        img_dir = os.path.join(data_dir, name)
-        for img_name in os.listdir(img_dir):
-            if not img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                continue
-            img_path = os.path.join(img_dir, img_name)
-            gray = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-            if gray is None: continue
-            
-            gray = cv2.resize(gray, (64, 64), interpolation=cv2.INTER_AREA)
-            
-            # Nhân bản nhiều lần bằng augmentation (20 lần/ảnh)
-            for _ in range(20):
-                aug = augment_image(gray)
-                norm = (aug.astype(np.float32) - 127.5) / 128.0
-                all_images.append(np.expand_dims(norm, axis=-1))
-                all_labels.append(idx)
-                
-    X_train = np.array(all_images)
-    Y_train = np.array(all_labels)
-    
-    if len(X_train) == 0:
-        return model
-        
-    print(f"[+] Đã tạo {len(X_train)} ảnh augment từ ảnh cá nhân để fine-tune.")
-    
-    dataset = tf.data.Dataset.from_tensor_slices((X_train, Y_train))
-    dataset = dataset.shuffle(2000).batch(batch_size, drop_remainder=False)
-    
-    print("\n[*] Đang thiết lập mạng Classifier (NormFace) để fine-tune...")
-    # Đóng băng 70% các lớp đầu tiên của backbone
-    num_layers = len(model.layers)
-    for layer in model.layers[:int(num_layers * 0.7)]:
-        layer.trainable = False
-        
-    inputs = tf.keras.Input(shape=(64, 64, 1))
-    embeddings = model(inputs, training=True)
-    
-    # Chuẩn hóa L2 và Scale (NormFace)
-    norm_embeddings = tf.keras.layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1))(embeddings)
-    scaled_embeddings = tf.keras.layers.Lambda(lambda x: x * 10.0)(norm_embeddings)
-    
-    # Lớp phân loại không bias
-    outputs = tf.keras.layers.Dense(len(identities), activation='softmax', use_bias=False)(scaled_embeddings)
-    
-    finetune_model = tf.keras.Model(inputs, outputs)
-    finetune_model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
-        loss='sparse_categorical_crossentropy',
-        metrics=['accuracy']
-    )
-    
-    # Huấn luyện
-    finetune_model.fit(dataset, epochs=30)
-
-            
-    print("[+] Fine-tuning hoàn tất! (Vấn đề Overlap đã được khắc phục)")
-    return model
 # HÀM HUẤN LUYỆN CHÍNH
 # ==============================================================================
 def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4, 
@@ -574,12 +489,6 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
     # Tạo mô hình sạch (uncompiled) để inference
     inference_student = build_tinyface_ghost(input_shape=(64, 64, 1), embedding_dim=128)
     inference_student.set_weights(student.get_weights())
-    
-    # Gọi hàm Fine-tuning chống Overlap trước khi lưu
-    registered_faces_dir = os.path.join(base_dir, "data", "registered_faces")
-    inference_student = finetune_on_registered_faces(
-        inference_student, registered_faces_dir, epochs=30, batch_size=16
-    )
     
     inference_student.save(backbone_path)
     

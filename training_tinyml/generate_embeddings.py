@@ -10,7 +10,10 @@ import glob
 import json
 import cv2
 import numpy as np
-import tensorflow as tf
+try:
+    import tflite_runtime.interpreter as tflite
+except ImportError:
+    import tensorflow.lite as tflite
 
 def generate_database():
     print("==================================================================")
@@ -18,17 +21,21 @@ def generate_database():
     print("==================================================================")
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(current_dir, "weights", "tinyface_backbone.keras")
+    model_path = os.path.join(current_dir, "weights", "tinyface_int8.tflite")
     
     if not os.path.exists(model_path):
-        print(f"❌ LỖI: Không tìm thấy mô hình tại {model_path}. Hãy chạy train_arcface_distill.py trước!")
+        print(f"❌ LỖI: Không tìm thấy mô hình tại {model_path}. Hãy chạy python extract_tflite.py trước!")
         return
 
-    # 1. Nạp mô hình
-    print(f"[*] Đang nạp mô hình: {model_path}")
-    from models.ghost_tinyface import build_tinyface_ghost
-    model = build_tinyface_ghost()
-    model.load_weights(model_path)
+    # 1. Nạp mô hình TFLite INT8
+    print(f"[*] Đang nạp mô hình INT8 TFLite: {model_path}")
+    interpreter = tflite.Interpreter(model_path=model_path)
+    interpreter.allocate_tensors()
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    
+    input_scale, input_zero_point = input_details[0]['quantization']
+    output_scale, output_zero_point = output_details[0]['quantization']
 
     # 2. Quét thư mục người dùng thực tế trong data/registered_faces
     base_dir = os.path.dirname(current_dir)
@@ -58,8 +65,24 @@ def generate_database():
             norm_img = (img.astype(np.float32) - 127.5) / 128.0
             norm_img = np.expand_dims(norm_img, axis=(0, -1)) # Shape: (1, 64, 64, 1)
 
-            # Trích xuất vector 128D và chuẩn hóa L2
-            emb = model(norm_img)[0].numpy() # shape: (128,)
+            # Lượng tử hóa Input thành INT8
+            if input_scale > 0:
+                input_data = (norm_img / input_scale) + input_zero_point
+                input_data = np.clip(input_data, -128, 127).astype(np.int8)
+            else:
+                input_data = norm_img.astype(np.float32)
+
+            interpreter.set_tensor(input_details[0]['index'], input_data)
+            interpreter.invoke()
+            output_data = interpreter.get_tensor(output_details[0]['index'])
+            
+            # Giải lượng tử hóa Output về Float32
+            if output_scale > 0:
+                emb = (output_data.astype(np.float32) - output_zero_point) * output_scale
+            else:
+                emb = output_data.astype(np.float32)
+                
+            emb = emb[0] # shape: (128,)
             norm_e = emb / (np.linalg.norm(emb) + 1e-7)
             user_embeddings.append(norm_e)
 

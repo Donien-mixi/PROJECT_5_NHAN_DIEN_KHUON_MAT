@@ -56,8 +56,8 @@ PROJECT_5_DIEM_DANH_KHUON_MAT/
 | **Mô hình** | Ghost-TinyFace (GhostNet Bottleneck) |
 | **Input** | 64×64 Grayscale (1 channel) |
 | **Output** | 128-D L2-normalized embedding |
-| **Kích thước model** | ~700KB (Keras), ~160KB (TFLite INT8) |
-| **Face Detector** | MediaPipe Face Mesh (468 điểm) / YuNet (5 điểm) |
+| **Kích thước model** | ~2MB (Keras), ~294KB (TFLite INT8) |
+| **Face Detector** | BlazeFace (TFLite INT8 trên ESP32) / Unified BlazeFace Emulator (trên Laptop) |
 | **Alignment** | Affine Similarity Transform (chuẩn InsightFace) |
 | **Matching** | Cosine Similarity (dot product trên L2-normalized vectors) |
 | **Threshold** | 0.75 (YuNet conf: 0.85) |
@@ -144,10 +144,10 @@ PROJECT_5_DIEM_DANH_KHUON_MAT/
 1. **Bí quyết 4 — Tăng tốc phần cứng AI (ESP-NN / Vector Instructions):** Tận dụng tập lệnh vector SIMD chuyên dụng trên nhân Xtensa LX7 của ESP32-S3 để xử lý các phép nhân ma trận INT8 song song cho cả 2 mô hình (Dò mặt + Nhận diện).
 2. **Chiến lược phân bổ bộ nhớ kép (Dual-Memory Allocation Strategy):**
    * *Internal SRAM (~512KB, tốc độ cao):* Dành riêng cho Stack/Heap hệ thống, FreeRTOS và các task khắt khe về độ trễ.
-   * *External PSRAM (8MB, tốc độ cao Octal SPIRAM):* Cấp phát 2 vùng Tensor Arena riêng biệt: `detector_arena` (~350KB) và `recognizer_arena` (~240KB). Đồng thời chứa bộ đệm nhận gói tin TCP/JPEG (`packet_buffer` ~64KB).
+   * *External PSRAM (8MB, tốc độ cao Octal SPIRAM):* Cấp phát 2 vùng Tensor Arena riêng biệt: `detector_arena` (~1.5MB) và `recognizer_arena` (~768KB). Đồng thời chứa bộ đệm nhận gói tin TCP/JPEG (`packet_buffer` ~64KB).
 3. **Chiến lược Face Detector gọn nhẹ On-Device (Dual-Model TinyML Pipeline):** 
    * Sử dụng mô hình Face Detector INT8 siêu nhẹ (BlazeFace / Ultra-Light INT8 input 128x128) chạy trực tiếp trên TFLite Micro ESP32 để tìm tọa độ Bounding Box.
-   * Viết thuật toán C++ Fast Crop & Bilinear Interpolation trên PSRAM để cắt và thu nhỏ vùng mặt về đúng chuẩn $64 \times 64$ Grayscale nạp sang mô hình Ghost-TinyFace mà không phụ thuộc vào thư viện OpenCV.
+   * Viết thuật toán C++ Fast Crop & Bilinear Interpolation trên PSRAM để cắt và thu nhỏ vùng mặt về đúng chuẩn $64 \times 64$ Grayscale nạp sang mô hình Ghost-TinyFace mà không phụ thuộc vào thư viện OpenCV. Đặc biệt, xây dựng bộ giả lập Unified BlazeFace Emulator trên Laptop bằng Python để đồng bộ tuyệt đối thuật toán cắt ảnh, giúp triệt tiêu hoàn toàn lệch pha miền dữ liệu (Domain Shift).
 4. **Kiến trúc xử lý đa luồng (Dual-Core Asymmetric Processing):**
    * **Core 0:** Chuyên chạy suy luận 2 mô hình AI tuần tự (Detector $128 \times 128 \rightarrow$ Fast Crop $64 \times 64 \rightarrow$ Recognizer $64 \times 64 \rightarrow$ Cosine Matching).
    * **Core 1:** Chuyên xử lý ngoại vi (Nhận luồng ảnh JPEG thô qua TCP Socket, điều khiển còi Buzzer, in ra Serial, ghi log).
@@ -226,8 +226,8 @@ PROJECT_5_DIEM_DANH_KHUON_MAT/
 | **2.x** | Lượng tử hóa INT8 và kiểm thử mô phỏng | ✅ **Hoàn thành (Đã tạo `.tflite`, Cosine Sim 99.87%)** |
 | **3.1** | Cấu hình PlatformIO, nạp model_data.h & face_database.h | ✅ **Hoàn thành** |
 | **3.2** | Hạ tầng mạng TCP & truyền nhận ảnh đa nhân | ✅ **Hoàn thành** |
-| **3.3** | Đưa Face Detector INT8 xuống ESP32 (Chạy 100% On-Device) | 🔄 **Đang thực hiện** |
-| **3.4** | Pipeline Nhận diện, Cosine Matching, Temporal Voting & SPIFFS Log | ✅ **Hoàn thành** |
+| **3.3** | Đưa Face Detector INT8 xuống ESP32 (Chạy 100% On-Device) | ✅ **Hoàn thành (Đã khử Domain Shift bằng Python Emulator)** |
+| **3.4** | Pipeline Nhận diện, Cosine Matching, Temporal Voting & SPIFFS Log | ✅ **Hoàn thành (Đã quy hoạch 768KB PSRAM cho Recognizer)** |
 | **3.5** | Tích hợp LCD ILI9341, Buzzer & LED trạng thái | 🔄 **Đang thực hiện** |
 | **3.6** | Phân tách đa nhân FreeRTOS (Dual-Core Asymmetric) | ✅ **Hoàn thành** |
 | **4.x** | Tối ưu tốc độ, Anti-Spoofing và kiểm thử 24h | ⏳ **Chờ thực hiện** |

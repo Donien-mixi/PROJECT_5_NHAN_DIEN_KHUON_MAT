@@ -6,7 +6,7 @@ import sys
 # Thêm thư mục gốc vào PYTHONPATH
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from host_laptop.detector.yunet_detector import UnifiedFaceDetector
+from host_laptop.detector.blazeface_esp32 import UnifiedFaceDetector
 from host_laptop.database.db_manager import DatabaseManager
 from host_laptop.recognizer.face_recognizer import FaceRecognizer, TemporalVoter
 from host_laptop.ui.hud_renderer import HUDRenderer

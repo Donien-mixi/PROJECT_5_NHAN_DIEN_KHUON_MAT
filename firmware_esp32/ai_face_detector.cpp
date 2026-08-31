@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <math.h>
 #include <TJpg_Decoder.h>
+#include "ai_config.h"
 
 // Thêm TFLite headers
 #include "tensorflow/lite/micro/all_ops_resolver.h"
@@ -22,7 +23,7 @@ tflite::MicroInterpreter* detector_interpreter = nullptr;
 TfLiteTensor* detector_input = nullptr;
 
 // Mô hình Float32 Weight Quantized BlazeFace cần nhiều Arena hơn so với model UINT8.
-constexpr int kDetectorArenaSize = 1500 * 1024; // Cần ~1.37MB
+// Kích thước Arena được quản lý động bởi ai_config.h từ AI Module.
 uint8_t* g_detector_tensor_arena = nullptr;
 
 struct Anchor { float x, y; };
@@ -40,12 +41,11 @@ void setup_face_detector() {
     }
     
     // Khởi tạo Tensor Arena cho Detector
-    // Cố gắng cấp phát trên INTERNAL SRAM để đạt tốc độ tối đa (rất nhanh).
-    // Tuy nhiên với mô hình Float32 hiện tại cần tới 500KB, khả năng cao sẽ hết SRAM nội bộ và phải fallback sang PSRAM.
-    uint8_t* raw_arena = (uint8_t*)heap_caps_malloc(kDetectorArenaSize + 16, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    // Cấp phát trong bộ nhớ nội bộ (Internal SRAM) nếu có thể, nếu không đủ sẽ chuyển qua PSRAM.
+    uint8_t* raw_arena = (uint8_t*)heap_caps_malloc(DETECTOR_ARENA_SIZE + 16, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!raw_arena) {
         Serial.println("⚠️ Cảnh báo: Không đủ Internal SRAM cho BlazeFace! Đang chuyển sang PSRAM (chậm hơn)...");
-        raw_arena = (uint8_t*)heap_caps_malloc(kDetectorArenaSize + 16, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        raw_arena = (uint8_t*)heap_caps_malloc(DETECTOR_ARENA_SIZE + 16, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     
     if (raw_arena) {
@@ -55,7 +55,7 @@ void setup_face_detector() {
         static tflite::MicroErrorReporter micro_error_reporter;
         static tflite::AllOpsResolver resolver;
         static tflite::MicroInterpreter static_interpreter(
-            detector_model, resolver, g_detector_tensor_arena, kDetectorArenaSize, &micro_error_reporter);
+            detector_model, resolver, g_detector_tensor_arena, DETECTOR_ARENA_SIZE, &micro_error_reporter);
             
         detector_interpreter = &static_interpreter;
         if (detector_interpreter->AllocateTensors() == kTfLiteOk) {

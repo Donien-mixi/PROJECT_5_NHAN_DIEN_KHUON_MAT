@@ -8,14 +8,14 @@
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "model_data.h"
 #include "face_database.h"
+#include "ai_config.h"
 
 // Biến toàn cục cho TFLite
 const tflite::Model* model = nullptr;
 tflite::MicroInterpreter* interpreter = nullptr;
 TfLiteTensor* input = nullptr;
 TfLiteTensor* output = nullptr;
-
-const int kTensorArenaSize = 240 * 1024; // 240KB (Đủ 164KB cho Model, chạy tốt cả trên PSRAM lẫn SRAM nội bộ)
+// Kích thước Arena được quản lý bởi ai_config.h  
 uint8_t* tensor_arena = nullptr;
 
 const int EMBEDDING_SIZE = 128;
@@ -26,20 +26,20 @@ void setup_face_recognizer() {
     Serial.println("Khoi tao TFLite Micro Face Recognizer...");
     
     // Cố gắng cấp phát Tensor Arena trên INTERNAL SRAM để đạt tốc độ tối đa (rất nhanh)
-    uint8_t* raw_arena = (uint8_t*)heap_caps_malloc(kTensorArenaSize + 16, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint8_t* raw_arena = (uint8_t*)heap_caps_malloc(RECOGNIZER_ARENA_SIZE + 16, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!raw_arena) {
-        Serial.println("❌ Cảnh báo: Không đủ Internal SRAM cho Recognizer (240KB)! Đang chuyển sang PSRAM (chậm hơn)...");
-        raw_arena = (uint8_t*)heap_caps_malloc(kTensorArenaSize + 16, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        Serial.printf("❌ Cảnh báo: Không đủ Internal SRAM cho Recognizer (%d bytes)! Đang chuyển sang PSRAM...\n", RECOGNIZER_ARENA_SIZE);
+        raw_arena = (uint8_t*)heap_caps_malloc(RECOGNIZER_ARENA_SIZE + 16, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     
     if (!raw_arena) {
         Serial.println("FATAL: Failed to allocate tensor arena!");
         return;
-    }
+    }  
     
     // Căn lề 16 bytes
     tensor_arena = (uint8_t*)(((uintptr_t)raw_arena + 15) & ~15);
-    model = tflite::GetModel(g_model);
+    model = tflite::GetModel(g_model_recognizer);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
         Serial.println("Model version mismatch!");
         return;
@@ -50,7 +50,7 @@ void setup_face_recognizer() {
 
     static tflite::AllOpsResolver resolver;
     static tflite::MicroInterpreter static_interpreter(
-        model, resolver, tensor_arena, kTensorArenaSize, error_reporter);
+        model, resolver, tensor_arena, RECOGNIZER_ARENA_SIZE, error_reporter);
     
     interpreter = &static_interpreter;
     if (interpreter->AllocateTensors() != kTfLiteOk) {

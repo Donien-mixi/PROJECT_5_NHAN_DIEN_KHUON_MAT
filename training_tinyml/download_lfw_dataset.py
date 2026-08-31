@@ -20,6 +20,19 @@ if hasattr(sys.stderr, 'reconfigure'):
 import cv2
 import numpy as np
 
+# Thêm đường dẫn để import từ host_laptop
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+try:
+    from host_laptop.detector.blazeface_esp32 import UnifiedFaceDetector
+    from host_laptop.core.vision_utils import center_square_crop
+except ImportError:
+    print("❌ LỖI: Không tìm thấy thư mục host_laptop!")
+    print("   Hãy chắc chắn bạn đã nén cả thư mục 'host_laptop' và 'training_tinyml' lên Colab.")
+    sys.exit(1)
 
 def download_and_prepare_lfw(min_faces=5, output_dir=None):
     """
@@ -91,17 +104,24 @@ def download_and_prepare_lfw(min_faces=5, output_dir=None):
     # Tạo thư mục đầu ra
     os.makedirs(output_dir, exist_ok=True)
     
+    print(f"\n[*] Đang khởi tạo BlazeFace ESP32 C++ Emulator để cắt ảnh...")
+    detector = UnifiedFaceDetector(target_size=(64, 64), conf_threshold=0.5)
+
     # Xử lý và lưu từng ảnh
-    print(f"\n[*] Đang tiền xử lý và lưu ảnh Grayscale 64x64...")
+    print(f"\n[*] Đang dùng BlazeFace để căn chỉnh và lưu ảnh Grayscale 64x64 (Student) & BGR 112x112 (Teacher)...")
     total_saved = 0
     identity_counts = {}
     
+    # Đồng thời lưu ảnh BGR gốc (resize 112x112) để SFace Teacher dùng
+    teacher_dir = os.path.join(output_dir, "_teacher_112x112")
+    os.makedirs(teacher_dir, exist_ok=True)
+    
     for i in range(len(images)):
         person_name = target_names[targets[i]]
-        # Tạo tên thư mục an toàn (thay dấu cách bằng dấu gạch dưới)
+        # Tạo tên thư mục an toàn
         safe_name = person_name.replace(" ", "_")
         person_dir = os.path.join(output_dir, safe_name)
-        os.makedirs(person_dir, exist_ok=True)
+        person_teacher_dir = os.path.join(teacher_dir, safe_name)
         
         # Chuyển ảnh từ float [0, 1] sang uint8 [0, 255]
         img_rgb = (images[i] * 255).astype(np.uint8)
@@ -109,53 +129,42 @@ def download_and_prepare_lfw(min_faces=5, output_dir=None):
         # Chuyển sang BGR cho OpenCV
         img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
         
-        # Chuyển sang Grayscale
-        img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        # CHẠY BLAZEFACE ĐỂ CẮT ẢNH CHUẨN ESP32
+        face_info = detector.detect_primary_face(img_bgr)
+        if face_info is None:
+            continue # Bỏ qua ảnh nếu BlazeFace không nhận ra
+            
+        x, y, w_box, h_box = face_info['bbox']
         
-        # Resize về 64x64 (kích thước đầu vào của Ghost-TinyFace)
-        img_64 = cv2.resize(img_gray, (64, 64), interpolation=cv2.INTER_AREA)
+        # Cắt 64x64 Grayscale cho Student
+        face_64_bgr, face_64_gray = center_square_crop(img_bgr, x, y, w_box, h_box, target_size=(64, 64))
+        # Cắt 112x112 BGR cho Teacher
+        face_112_bgr, _ = center_square_crop(img_bgr, x, y, w_box, h_box, target_size=(112, 112))
+        
+        if face_64_gray is None or face_112_bgr is None:
+            continue
+            
+        os.makedirs(person_dir, exist_ok=True)
+        os.makedirs(person_teacher_dir, exist_ok=True)
         
         # Đếm số ảnh đã lưu cho mỗi người
         if safe_name not in identity_counts:
             identity_counts[safe_name] = 0
         identity_counts[safe_name] += 1
         
-        # Lưu file ảnh
+        # Lưu file ảnh Student
         img_filename = f"{safe_name}_{identity_counts[safe_name]:04d}.jpg"
-        img_path = os.path.join(person_dir, img_filename)
-        cv2.imwrite(img_path, img_64)
+        cv2.imwrite(os.path.join(person_dir, img_filename), face_64_gray)
+        
+        # Lưu file ảnh Teacher
+        teacher_filename = f"teacher_{safe_name}_{identity_counts[safe_name]:04d}.jpg"
+        cv2.imwrite(os.path.join(person_teacher_dir, teacher_filename), face_112_bgr)
+        
         total_saved += 1
         
         # Hiển thị tiến trình
         if (i + 1) % 500 == 0 or (i + 1) == len(images):
-            print(f"    [{i+1}/{len(images)}] Đã xử lý...")
-    
-    # Đồng thời lưu ảnh BGR gốc (resize 112x112) để SFace Teacher dùng
-    teacher_dir = os.path.join(output_dir, "_teacher_112x112")
-    os.makedirs(teacher_dir, exist_ok=True)
-    
-    print(f"\n[*] Đang tạo bộ ảnh 112x112 BGR cho SFace Teacher...")
-    for i in range(len(images)):
-        person_name = target_names[targets[i]]
-        safe_name = person_name.replace(" ", "_")
-        
-        img_rgb = (images[i] * 255).astype(np.uint8)
-        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-        img_112 = cv2.resize(img_bgr, (112, 112), interpolation=cv2.INTER_AREA)
-        
-        person_teacher_dir = os.path.join(teacher_dir, safe_name)
-        os.makedirs(person_teacher_dir, exist_ok=True)
-        
-        count_key = f"teacher_{safe_name}"
-        if count_key not in identity_counts:
-            identity_counts[count_key] = 0
-        identity_counts[count_key] += 1
-        
-        img_path = os.path.join(person_teacher_dir, f"{safe_name}_{identity_counts[count_key]:04d}.jpg")
-        cv2.imwrite(img_path, img_112)
-        
-        if (i + 1) % 500 == 0 or (i + 1) == len(images):
-            print(f"    [{i+1}/{len(images)}] Đã tạo ảnh Teacher...")
+            print(f"    [{i+1}/{len(images)}] Đã cắt và lưu bằng BlazeFace...")
     
     # Thống kê
     num_identities = len([d for d in os.listdir(output_dir) 

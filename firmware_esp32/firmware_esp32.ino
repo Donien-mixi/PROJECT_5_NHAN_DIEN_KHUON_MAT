@@ -1,12 +1,13 @@
-#include <Arduino.h>              
-#include <TensorFlowLite_ESP32.h>     
+#include <Arduino.h>                
+#include <TensorFlowLite_ESP32.h>       
 #include <SPIFFS.h> // Thư viện ghi file lưu lịch sử
-#include <TJpg_Decoder.h>   
+#include <TJpg_Decoder.h>     
 #include "wifi_udp_server.h"     
 #include "image_decoder.h"    
 #include "ai_face_detector.h"
-#include "ai_face_recognizer.h"                     
-      
+#include "ai_face_recognizer.h"      
+#include "ai_config.h"
+
 // Task handles     
 TaskHandle_t NetworkDisplayTask;               
 TaskHandle_t AITask;
@@ -24,13 +25,13 @@ void log_attendance(const char* name) {
         Serial.println("❌ Lỗi: Không thể mở file attendance.csv để ghi!");
         return;
     }
-    // Ghi tên và thời gian (Uptime)
+    // Ghi tên và thời gian (Uptime)  
     file.printf("%s, Uptime: %lu ms\n", name, millis());
     file.close();
     Serial.printf("💾 Đã lưu lịch sử điểm danh của %s vào bộ nhớ Flash!\n", name);
 }
 
-void network_display_task(void *pvParameters) {
+void network_display_task(void *pvParameters) {  
     Serial.println("[NetDisplayTask] Bắt đầu setup_wifi_and_udp()...");
     setup_wifi_and_udp();
     
@@ -118,7 +119,7 @@ void ai_processing_task(void *pvParameters) {
     Serial.println("[AITask] Models ready.");
     
     // Cấp phát trên HEAP để tránh tràn STACK
-    std::vector<float> face_tensor(64 * 64);
+    std::vector<float> face_tensor(FACE_TARGET_SIZE * FACE_TARGET_SIZE);
     float face_embedding[128];
     
     // Biến cho Temporal Voting
@@ -153,7 +154,7 @@ void ai_processing_task(void *pvParameters) {
             // Bước 1: Dò khuôn mặt
             FaceBox box = detect_face();
             Serial.printf("[AITask] detect_face() chạy xong! Thời gian: %lu ms\n", millis() - t0);
-            Serial.flush();
+            Serial.flush();  
             
             if (box.is_valid) {
                 // Serial.println("[AITask] Đang tiền xử lý (Crop & Grayscale)...");
@@ -161,8 +162,8 @@ void ai_processing_task(void *pvParameters) {
                     // Bước 3: Rút trích Vector 128-D
                     extract_face_embedding(face_tensor.data(), face_embedding);
                     
-                    // Bước 4: So khớp danh tính (Threshold 0.56 theo đề xuất)
-                    const float THRESHOLD = 0.56f;
+                    // Bước 4: So khớp danh tính (Threshold 0.93 theo đề xuất)
+                    const float THRESHOLD = 0.93f;
                     const char* name = identify_face(face_embedding, THRESHOLD);
                     bool is_unknown = (strcmp(name, "Unknown") == 0);
                     
