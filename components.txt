@@ -1,0 +1,112 @@
+Bộ KIT Học Tập BLK Uno R3 RFID bao gồm
+Danh Sách Linh Kiện
+
+Tên Linh Kiện
+
+SL
+
+Tên Linh Kiện
+
+SL
+
+1. KIT  UNO R3 CH340G (Kèm Dây USB và Jump Đơn 2.54mm )	
+1
+
+18. Remote Hồng Ngoại 20 Phím	
+1
+
+2. LCD1602 Xanh Lá 5V	
+1
+
+19. Nút Nhấn 4 Chân 12x12x7.3MM (OMRON B3F)	
+4
+
+3. Động cơ Servo SG90 (Góc Quay 180)	
+1
+
+20. Vỏ Nút Nhấn B3F 10MM (Tròn Đen) 	
+4
+
+4. Động Cơ Bước 5V STEP MOTOR 28BYJ-48 5VDC	
+1
+
+21. Trở Vạch 1/4W 5% 220R	
+10
+
+5. Module Điện Trở Nhiệt NTC	
+1
+
+22. Trở Vạch 1/4W 5% 1K	
+10
+
+6. Module ULN2003	
+1
+
+23. Trở Vạch 1/4W 5% 10K	
+10
+
+7. Module Cảm Biến Ánh Sáng MS-CDS05	
+1
+
+24. Led 5MM Phủ Đỏ 	
+10
+
+8. Module Cảm Biến Rung SW-420	
+1
+
+25. LED 5MM Phủ Xanh Lá 	
+10
+
+9. Module LED Neo Pixel 12 LED RGB	
+1
+
+26. Led 5mm phủ vàng 	
+10
+
+10. Board Test GL No.12	
+1
+
+27. Pin 9V (Loại Thường)	
+1
+
+11. Bộ Dây Cắm Mạch YC-65	
+1
+
+28. Dây Đế Pin 9V Ra Đầu Jack DC5.5x2.1mm	
+1
+
+12. Dây 40P 20CM Đ-C (Hai Đầu Đực Cái) (10 Sợi)	
+1
+
+29. Triết Áp Đơn B10K	
+1
+
+13. Module Led 7 0.36 4 Số Katot	
+1
+
+30. Còi Chíp 5V 9.5x12MM	
+1
+
+14. Led 7 0.56 1 Số Anot (Sáng Đỏ)	
+1
+
+31.  Module RFID RC522 13.56MHz	
+1
+
+15. 74HC595 DIP16	
+1
+
+32. Keypad 4x4 SMD	
+1
+
+16. LED Matrix 2 Màu Xanh Đỏ 8x8 38x38x7.2mm Anode Chung	
+1
+
+33. Module relay Mini 1 kênh 5V10A BLK	
+1
+
+17. Module Thu Hồng Ngoại 1838T MH-R38	
+1
+
+34. Hộp Đựng KIT Học Tập Arduino HD-UNO	
+1

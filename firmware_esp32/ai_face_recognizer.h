@@ -13,6 +13,6 @@ void extract_face_embedding(const float* input_tensor, float* output_embedding);
 // So khớp với Cơ sở dữ liệu khuôn mặt. 
 // Trả về tên người dùng khớp nhất (có độ tương đồng Cosine Similarity > threshold)
 // Hoặc "Unknown" nếu không khớp ai.
-const char* identify_face(const float* face_embedding, float threshold = 0.85f);
+const char* identify_face(const float* face_embedding, float threshold = 0.60f);
 
 #endif

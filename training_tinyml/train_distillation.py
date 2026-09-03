@@ -35,6 +35,7 @@ from tensorflow.keras import optimizers
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from training_tinyml.models.ghost_tinyface import build_tinyface_ghost
+from host_laptop.core.vision_utils import equalize_gray_256
 
 
 # ==============================================================================
@@ -63,16 +64,17 @@ def augment_image(image_np):
     if np.random.rand() > 0.5:
         img = cv2.flip(img, 1)
 
-    # 3. Biến đổi Gamma (mô phỏng ánh sáng)
-    if np.random.rand() > 0.35:
-        gamma = np.random.uniform(0.60, 1.50)
+    # 3. Biến đổi Gamma (mô phỏng ánh sáng) — mở rộng để phủ cả ảnh RẤT TỐI/SÁNG
+    #    (thực tế user chụp tối mean~42 — augmentation phải phủ rộng hơn nữa)
+    if np.random.rand() > 0.25:
+        gamma = np.random.uniform(0.40, 2.20)
         inv_gamma = 1.0 / gamma
         table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
         img = cv2.LUT(img, table)
 
-    # 4. Thay đổi Contrast & Brightness
-    alpha = np.random.uniform(0.70, 1.30)
-    beta = np.random.uniform(-30, 30)
+    # 4. Thay đổi Contrast & Brightness — dải rộng (mô phỏng mọi điều kiện ánh sáng)
+    alpha = np.random.uniform(0.55, 1.45)
+    beta = np.random.uniform(-60, 60)
     img = np.clip(alpha * img + beta, 0, 255).astype(np.uint8)
 
     # 5. Làm mờ nhẹ ngẫu nhiên (Motion Blur / Defocus)
@@ -267,32 +269,31 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
                 continue
             teacher_bgr = cv2.resize(teacher_bgr, (112, 112), interpolation=cv2.INTER_AREA)
             
-            # Nhân bản với augmentation
+            # Teacher embedding từ ảnh SẠCH (không augment): student học map
+            # HE(aug(ánh sáng/tối)) -> emb(clean) => BẤT BIẾN ÁNH SÁNG.
+            # (Bài học thực tế: user chụp tối mean=42 khiến model nhầm người.)
+            clean_teacher_feat = teacher.feature(teacher_bgr)[0]
+            clean_teacher_feat = clean_teacher_feat / (np.linalg.norm(clean_teacher_feat) + 1e-7)
+
+            # Nhân bản với augmentation — student nhận ảnh augment + HE,
+            # teacher giữ embedding ảnh sạch => bất biến ánh sáng trong loss.
             for aug_idx in range(augment_repeat):
                 if aug_idx == 0:
-                    # Bản gốc (không augment)
+                    # Bản gốc (không augment) — vẫn HE đồng bộ pipeline triển khai
                     aug_gray = student_gray.copy()
-                    aug_teacher_bgr = teacher_bgr.copy()
                 else:
-                    # Augment ảnh Student
+                    # Augment ảnh Student (độ sáng/tối/gamma/độ tương phản)
                     aug_gray = augment_image(student_gray)
-                    # Tạo bản BGR 112x112 tương ứng cho Teacher
-                    # (Augment riêng ảnh grayscale rồi scale lên BGR cho Teacher)
-                    aug_teacher_bgr = cv2.cvtColor(
-                        cv2.resize(aug_gray, (112, 112), interpolation=cv2.INTER_LINEAR),
-                        cv2.COLOR_GRAY2BGR
-                    )
-                
-                # Teacher trích xuất embedding 128-D
-                teacher_feat = teacher.feature(aug_teacher_bgr)[0]
-                teacher_feat = teacher_feat / (np.linalg.norm(teacher_feat) + 1e-7)
-                
+
+                # HE đồng bộ pipeline triển khai (align_and_crop live + preprocess_face ESP32)
+                he_gray = equalize_gray_256(aug_gray)
+
                 # Chuẩn hóa ảnh Student về [-1.0, 1.0]
-                norm_64 = (aug_gray.astype(np.float32) - 127.5) / 128.0
+                norm_64 = (he_gray.astype(np.float32) - 127.5) / 128.0
                 norm_64 = np.expand_dims(norm_64, axis=-1)  # (64, 64, 1)
-                
+
                 all_student_inputs.append(norm_64)
-                all_teacher_targets.append(teacher_feat)
+                all_teacher_targets.append(clean_teacher_feat)
                 all_identity_labels.append(identity_idx)
         
         processed_count += num_pairs
@@ -378,91 +379,120 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
     # BƯỚC 6: Vòng lặp huấn luyện tùy chỉnh (Custom Training Loop)
     # =========================================================================
     # Hệ số Loss:
-    #   α = 1.0 (Cosine Distance - quan trọng nhất, giữ hướng vector)
-    #   β = 0.5 (MSE - giữ biên độ)
+    #   α = 0.5 (Cosine KD - giữ hướng vector teacher)
+    #   β = 0.25 (MSE - giữ biên độ)
     #   γ = 0.3 (Hard Negative Mining - đẩy xa cặp khác người)
-    ALPHA = 1.0   # Cosine Loss weight
-    BETA = 0.5    # MSE Loss weight
+    #   δ = 1.0 (ArcFace - ÉP MARGIN GÓC giữa các danh tính LFW — giải pháp chuẩn
+    #            cho bài toán "2 người bị nhầm nhau", Deng et al. CVPR 2019)
+    ALPHA = 0.5   # Cosine Loss weight
+    BETA = 0.25   # MSE Loss weight
     GAMMA = 0.3   # Hard Negative Mining Loss weight
+    DELTA = 1.0   # ArcFace Loss weight
     HN_MARGIN = 0.5  # Margin cho Hard Negative (khoảng cách tối thiểu)
-    
-    print(f"\n[*] Hệ số Loss: α={ALPHA} (Cosine) + β={BETA} (MSE) + γ={GAMMA} (HN, margin={HN_MARGIN})")
+    ARC_MARGIN = 0.30  # ArcFace additive angular margin (rad)
+    ARC_SCALE = 30.0   # ArcFace logit scale
+
+    # ArcFace class weights — CHỈ dùng lúc train (không export xuống inference,
+    # model vẫn xuất embedding thuần 128-D như cũ)
+    num_identities = len(identity_to_idx)
+    arc_weights = tf.Variable(
+        tf.random.normal([num_identities, 128]) * 0.01, name="arcface_class_weights")
+
+    print(f"\n[*] Hệ số Loss: α={ALPHA} (Cosine) + β={BETA} (MSE) + γ={GAMMA} (HN) "
+          f"+ δ={DELTA} (ArcFace m={ARC_MARGIN}, s={ARC_SCALE}, {num_identities} identities)")
     print(f"\n{'='*70}")
     print(f"   BẮT ĐẦU HUẤN LUYỆN UNIVERSAL DISTILLATION ({epochs} Epochs)")
     print(f"{'='*70}")
-    
+
     # Tạo tf.data.Dataset
     dataset = tf.data.Dataset.from_tensor_slices((X_train, Y_teacher, Z_labels))
     dataset = dataset.shuffle(buffer_size=min(len(X_train), 10000))
     dataset = dataset.batch(batch_size, drop_remainder=True)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
-    
+
     best_loss = float('inf')
     patience_counter = 0
     patience_limit = 8  # Early stopping nếu loss không giảm sau 8 epochs
-    
+
+    train_vars = list(student.trainable_variables) + [arc_weights]
+
     @tf.function
     def train_step(batch_x, batch_y_teacher, batch_labels):
         with tf.GradientTape() as tape:
             # Forward pass Student
             student_emb = student(batch_x, training=True)
-            
+
             # 1. Cosine Distance Loss
             t_norm = tf.nn.l2_normalize(batch_y_teacher, axis=-1)
             s_norm = tf.nn.l2_normalize(student_emb, axis=-1)
             cosine_sim = tf.reduce_sum(t_norm * s_norm, axis=-1)
             cosine_loss = tf.reduce_mean(1.0 - cosine_sim)
-            
+
             # 2. MSE Loss (trên vector đã chuẩn hóa L2)
             mse_loss = tf.reduce_mean(tf.square(t_norm - s_norm))
-            
+
             # 3. Hard Negative Mining Loss
             hn_loss = compute_hard_negative_loss(
                 student_emb, batch_labels, margin=HN_MARGIN
             )
-            
+
+            # 4. ArcFace Loss (additive angular margin — ép margin giữa identities)
+            w_norm = tf.nn.l2_normalize(arc_weights, axis=-1)
+            logits = tf.matmul(s_norm, w_norm, transpose_b=True)  # cosine (B, I)
+            theta = tf.acos(tf.clip_by_value(logits, -1.0 + 1e-6, 1.0 - 1e-6))
+            onehot = tf.one_hot(batch_labels, num_identities)
+            target_cos = tf.cos(theta + ARC_MARGIN) * onehot + logits * (1.0 - onehot)
+            arc_logits = target_cos * ARC_SCALE
+            arc_loss = tf.reduce_mean(
+                tf.nn.sparse_softmax_cross_entropy_with_logits(
+                    labels=batch_labels, logits=arc_logits))
+
             # Tổng hợp Loss
-            total_loss = ALPHA * cosine_loss + BETA * mse_loss + GAMMA * hn_loss
-        
+            total_loss = (ALPHA * cosine_loss + BETA * mse_loss +
+                          GAMMA * hn_loss + DELTA * arc_loss)
+
         # Backward pass
-        grads = tape.gradient(total_loss, student.trainable_variables)
-        
+        grads = tape.gradient(total_loss, train_vars)
+
         # Gradient Clipping (chống gradient explosion)
         grads, _ = tf.clip_by_global_norm(grads, 5.0)
-        
-        optimizer.apply_gradients(zip(grads, student.trainable_variables))
-        
-        return cosine_loss, mse_loss, hn_loss, total_loss
+
+        optimizer.apply_gradients(zip(grads, train_vars))
+
+        return cosine_loss, mse_loss, hn_loss, arc_loss, total_loss
 
     for epoch in range(epochs):
         epoch_cosine_loss = []
         epoch_mse_loss = []
         epoch_hn_loss = []
+        epoch_arc_loss = []
         epoch_total_loss = []
-        
+
         for batch_idx, (batch_x, batch_y_teacher, batch_labels) in enumerate(dataset):
-            c_loss, m_loss, h_loss, t_loss = train_step(batch_x, batch_y_teacher, batch_labels)
-            
+            c_loss, m_loss, h_loss, a_loss, t_loss = train_step(batch_x, batch_y_teacher, batch_labels)
+
             epoch_cosine_loss.append(c_loss)
             epoch_mse_loss.append(m_loss)
             epoch_hn_loss.append(h_loss)
+            epoch_arc_loss.append(a_loss)
             epoch_total_loss.append(t_loss)
-        
+
         # Thống kê epoch
         avg_total = np.mean(epoch_total_loss)
         avg_cosine = np.mean(epoch_cosine_loss)
         avg_mse = np.mean(epoch_mse_loss)
         avg_hn = np.mean(epoch_hn_loss)
-        
+        avg_arc = np.mean(epoch_arc_loss)
+
         current_lr = optimizer.learning_rate
         if hasattr(current_lr, '__call__'):
             current_lr = current_lr(optimizer.iterations).numpy()
         elif hasattr(current_lr, 'numpy'):
             current_lr = current_lr.numpy()
-        
+
         print(f"Epoch {epoch+1:3d}/{epochs} | "
               f"Loss: {avg_total:.4f} "
-              f"(Cos: {avg_cosine:.4f}, MSE: {avg_mse:.4f}, HN: {avg_hn:.4f}) | "
+              f"(Cos: {avg_cosine:.4f}, MSE: {avg_mse:.4f}, HN: {avg_hn:.4f}, ARC: {avg_arc:.4f}) | "
               f"LR: {current_lr:.6f}")
         
         # Early Stopping Check

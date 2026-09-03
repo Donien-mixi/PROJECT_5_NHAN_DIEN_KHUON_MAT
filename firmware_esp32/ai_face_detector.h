@@ -2,29 +2,39 @@
 #define AI_FACE_DETECTOR_H
 
 #include <stdint.h>
-#include <vector>
+#include "ai_config.h"
+
+// Đồng bộ Laptop ↔ ESP32: RAW 128x128 RGB (README.md:57,240)
+// FRAME_BUFFER_SIZE đã định nghĩa trong ai_config.h (32768 RGB565)
+#ifndef FRAME_WIDTH
+#define FRAME_WIDTH  RAW_FRAME_SIZE
+#endif
+#ifndef FRAME_HEIGHT
+#define FRAME_HEIGHT RAW_FRAME_SIZE
+#endif
 
 struct FaceBox {
     int x;
     int y;
     int width;
     int height;
+    // Giữ tọa độ float đã decode để Bilinear trùng khớp host Python,
+    // không làm tròn rồi mới crop.
+    float center_x;
+    float center_y;
+    float crop_size;
+    float score;
     bool is_valid;
 };
 
-// Global frame buffer to avoid double JPEG decoding
 extern uint16_t* g_frame_buffer;
 
-// Hàm khởi tạo bộ dò khuôn mặt (MTMN / BlazeFace)
+// [PERF] 4.1 — đo thời gian từng chặng preprocess (micros), đọc từ AITask để in Serial
+extern unsigned long g_us_bilinear; // Bilinear 128→64
+extern unsigned long g_us_he;       // Histogram Equalization LUT
+
 void setup_face_detector();
-
-// Hàm chạy dò khuôn mặt trên ảnh JPEG
-// Trả về bounding box của khuôn mặt đầu tiên tìm thấy
 FaceBox detect_face();
-
-// Hàm trích xuất, cắt (crop) và scale khuôn mặt về 64x64 Grayscale
-// Đầu vào là JPEG gốc và tọa độ FaceBox.
-// Đầu ra là mảng float 64x64 (đã chuẩn hóa (x - 127.5)/128.0) dùng cho TFLite
-bool preprocess_face(const FaceBox& box, float* out_tensor);
+bool preprocess_face(const FaceBox& box, float* out_tensor); // 64x64 float [-1,1]
 
 #endif

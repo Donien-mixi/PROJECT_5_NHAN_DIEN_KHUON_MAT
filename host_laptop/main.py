@@ -10,6 +10,7 @@ from host_laptop.detector.blazeface_esp32 import UnifiedFaceDetector
 from host_laptop.database.db_manager import DatabaseManager
 from host_laptop.recognizer.face_recognizer import FaceRecognizer, TemporalVoter
 from host_laptop.ui.hud_renderer import HUDRenderer
+from host_laptop.core.vision_utils import prepare_esp32_frame
 
 def main():
     print("==================================================================")
@@ -22,9 +23,10 @@ def main():
     sqlite_db_path = os.path.join(base_dir, "data", "attendance.db")
     
     # 1. Khởi tạo các module (Phân chia logic rõ ràng)
-    recognizer = FaceRecognizer(model_path=model_path, db_path=json_db_path, threshold=0.88, use_tflite=True)
+    recognizer = FaceRecognizer(model_path=model_path, db_path=json_db_path, threshold=0.60, use_tflite=True)
     detector = UnifiedFaceDetector(target_size=(64, 64), conf_threshold=0.80)
     db = DatabaseManager(db_path=sqlite_db_path, cooldown_seconds=30)
+    # Đồng bộ ESP32: TEMPORAL_VOTES=3, pause-on-Unknown (face_recognizer.py TemporalVoter)
     voter = TemporalVoter(required_votes=3)
     
     # 2. Khởi tạo Camera
@@ -42,6 +44,7 @@ def main():
     fps = 0.0
     frame_count = 0
     fps_time = time.time()
+    WARMUP_FRAMES = 20  # bỏ ~1s frame đầu để webcam tự cân bằng sáng (tránh điểm thấp lần đầu)
     
     # Các biến trạng thái nhận diện
     last_crop_bgr = None
@@ -49,13 +52,25 @@ def main():
     tracked_name = None
     tracked_sim = 0.0
     tracked_infer = 0.0
+    last_lock_time = 0.0
+    RECOGNIZE_EVERY = 3  # chống lag cửa sổ: recognizer chạy ~10 lần/s thay vì 30
+    ai_counter = 1       # đếm ngược frame tới lượt chạy recognizer tiếp theo
     
     try:
         while True:
             ret, frame = cap.read()
             if not ret: break
-                
-            frame = cv2.flip(frame, 1)
+            
+            # Bỏ qua frame warm-up đầu phiên (auto-exposure webcam chưa ổn định)
+            if frame_count < WARMUP_FRAMES:
+                frame_count += 1
+                continue
+
+            # CÙNG PIPELINE ESP32: center crop -> RAW 128 (resize 1 lần) -> JPEG q80 -> RGB565 (mo_ta_project.md:29)
+            # Không flip — streamer/ESP32 cũng nhận ảnh gốc không lật.
+            frame = prepare_esp32_frame(frame)
+            if frame is None:
+                continue
             frame_count += 1
             
             # Tính FPS
@@ -86,8 +101,15 @@ def main():
                 if crop_bgr is not None:
                     last_crop_bgr = crop_bgr
                     
-                    if not tracked_name:
-                        # 4. Trích xuất đặc trưng và so khớp (Recognizer)
+                    # 4+5. Trích xuất đặc trưng, so khớp và bỏ phiếu (Recognizer + Voter)
+                    # Chạy recognizer mỗi RECOGNIZE_EVERY frame (~10 lần/s) để cửa sổ
+                    # hiển thị không lag; kết quả gần nhất được giữ lại cho HUD.
+                    # Vẫn nhận diện LẠI liên tục (không khoá theo tracked_name) -> khi
+                    # đổi người, hệ thống tự sửa nhầm trong vài frame.
+                    ai_counter -= 1
+                    if ai_counter <= 0:
+                        ai_counter = RECOGNIZE_EVERY
+                        
                         matched_raw, name_raw, sim_raw, infer_ms_raw = recognizer.recognize(crop_gray)
                         
                         # Hiển thị log trạng thái đang quét
@@ -98,17 +120,28 @@ def main():
                         # 5. Bộ lọc nhiễu (Temporal Voter)
                         is_locked, final_name, final_sim, final_infer = voter.vote(name_raw, sim_raw, infer_ms_raw)
                         
-                        if is_locked:
-                            # Chốt kết quả
-                            tracked_name = final_name
-                            tracked_sim = final_sim
-                            tracked_infer = final_infer
-                            
-                            sys.stdout.write(f"\r✅ Đã nhận diện: {tracked_name} ({tracked_sim*100:.1f}%) | {elapsed:.1f}s\n")
-                            sys.stdout.flush()
-                            
-                            # 6. Ghi log CSDL (Database)
-                            db.log_attendance(tracked_name, tracked_sim, tracked_infer)
+                        if is_locked and final_name != "Unknown":
+                            if final_name != tracked_name:
+                                # Đổi người (hoặc chốt lần đầu) -> in + ghi DB (có cooldown 30s)
+                                tracked_name = final_name
+                                tracked_sim = final_sim
+                                tracked_infer = final_infer
+                                last_lock_time = time.time()
+                                
+                                sys.stdout.write(f"\r✅ Đã nhận diện: {tracked_name} ({tracked_sim*100:.1f}%) | {elapsed:.1f}s\n")
+                                sys.stdout.flush()
+                                
+                                # 6. Ghi log CSDL (Database)
+                                db.log_attendance(tracked_name, tracked_sim, tracked_infer)
+                            else:
+                                # Cùng người re-lock liên tục -> chỉ làm mới thời hạn
+                                last_lock_time = time.time()
+                    
+                    # Hết hạn định danh cũ nếu lâu không chốt lại (mặt đã đổi/không khớp)
+                    if tracked_name and (time.time() - last_lock_time > 3.0):
+                        tracked_name = None
+                        tracked_sim = 0.0
+                        tracked_infer = 0.0
                     
                     if tracked_name:
                         matched = True
@@ -130,6 +163,7 @@ def main():
                 tracked_name = None
                 tracked_sim = 0.0
                 tracked_infer = 0.0
+                last_lock_time = 0.0
                 voter.reset()
             
             # 7. Vẽ giao diện HUD (UI)

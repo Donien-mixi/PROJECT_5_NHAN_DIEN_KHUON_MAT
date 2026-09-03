@@ -28,7 +28,7 @@ if parent_dir not in sys.path:
 
 try:
     from host_laptop.detector.blazeface_esp32 import UnifiedFaceDetector
-    from host_laptop.core.vision_utils import center_square_crop
+    from host_laptop.core.vision_utils import center_crop_to_raw, _crop_and_resize_bilinear_gray
 except ImportError:
     print("❌ LỖI: Không tìm thấy thư mục host_laptop!")
     print("   Hãy chắc chắn bạn đã nén cả thư mục 'host_laptop' và 'training_tinyml' lên Colab.")
@@ -129,18 +129,32 @@ def download_and_prepare_lfw(min_faces=5, output_dir=None):
         # Chuyển sang BGR cho OpenCV
         img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
         
-        # CHẠY BLAZEFACE ĐỂ CẮT ẢNH CHUẨN ESP32
-        face_info = detector.detect_primary_face(img_bgr)
+        # CHẠY BLAZEFACE ĐỂ CẮT ẢNH CHUẨN ESP32 (đồng bộ emulator: RGB565 + Bilinear)
+        # Đây là tập train LFW (không phải ảnh detector 128 của pipeline live), nên ta
+        # tạm crop vuông rồi chuẩn hóa về input 128x128 của detector. Bounding box kết quả
+        # sẽ scale ngược về độ phân giải gốc trước khi crop Bilinear thủ công.
+        raw_128 = center_crop_to_raw(img_bgr)          # center crop vuông + resize 128 (1 lần)
+        if raw_128 is None:
+            continue
+        face_info = detector.detect_primary_face(raw_128)
         if face_info is None:
             continue # Bỏ qua ảnh nếu BlazeFace không nhận ra
-            
-        x, y, w_box, h_box = face_info['bbox']
-        
-        # Cắt 64x64 Grayscale cho Student
-        face_64_bgr, face_64_gray = center_square_crop(img_bgr, x, y, w_box, h_box, target_size=(64, 64))
-        # Cắt 112x112 BGR cho Teacher
-        face_112_bgr, _ = center_square_crop(img_bgr, x, y, w_box, h_box, target_size=(112, 112))
-        
+
+        # Scale bbox từ hệ 128x128 về hệ crop vuông gốc (center crop vuông, không resize)
+        h_sq, w_sq = img_bgr.shape[:2]
+        sq = center_crop_to_raw(img_bgr, min(h_sq, w_sq))  # crop vuông giữ nguyên độ phân giải
+        if sq is None:
+            continue
+        s_sq = min(h_sq, w_sq)
+        ratio = s_sq / detector.input_size
+        cx_full = face_info['cx'] * ratio
+        cy_full = face_info['cy'] * ratio
+        size_full = face_info['size'] * ratio * 1.1  # x1.1 giống align_and_crop (đồng bộ C++)
+
+        # Cắt 64x64 Grayscale cho Student + 112x112 BGR cho Teacher (Bilinear thủ công)
+        face_64_bgr, face_64_gray = _crop_and_resize_bilinear_gray(sq, cx_full, cy_full, size_full, 64)
+        face_112_bgr, _ = _crop_and_resize_bilinear_gray(sq, cx_full, cy_full, size_full, 112)
+
         if face_64_gray is None or face_112_bgr is None:
             continue
             

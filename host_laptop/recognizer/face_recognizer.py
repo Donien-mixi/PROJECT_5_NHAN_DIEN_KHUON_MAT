@@ -10,7 +10,7 @@ class FaceRecognizer:
     nạp cơ sở dữ liệu JSON và thực hiện trích xuất đặc trưng (embedding)
     cũng như so khớp (Matching) bằng Cosine Similarity.
     """
-    def __init__(self, model_path, db_path, threshold=0.75, use_tflite=False):
+    def __init__(self, model_path, db_path, threshold=0.60, use_tflite=False):
         self.threshold = threshold
         self.use_tflite = use_tflite
         self.model = None
@@ -99,53 +99,93 @@ class FaceRecognizer:
         
         best_name = "Unknown"
         best_sim = -1.0
-        
-        # So khớp
+
+        # So khớp: nếu có đa templates, lấy MAX-SIM (tăng khớp khi góc/ánh sáng live đổi,
+        # không cần chụp thêm ảnh). Người lạ vẫn bị đối chiếu với toàn bộ templates nên
+        # điểm của họ vẫn nằm trong dải thấp, không lọt.
+        # Lưu ý: argmax TRƯỚC, áp ngưỡng SAU (đồng bộ identify_face firmware 4.2).
         for uname, udata in self.database.items():
-            ref_emb = np.array(udata["embedding"], dtype=np.float32)
-            sim = np.dot(emb, ref_emb)
-            if sim > best_sim:
-                best_sim = sim
-                best_name = uname
-                
-        matched = (best_sim >= self.threshold)
+            refs = udata.get("templates")
+            if refs:
+                for t in refs:
+                    sim = float(np.dot(emb, np.array(t, dtype=np.float32)))
+                    if sim > best_sim:
+                        best_sim = sim
+                        best_name = uname
+            else:
+                # Fallback nếu DB cũ chỉ có centroid
+                ref_emb = np.array(udata["embedding"], dtype=np.float32)
+                sim = float(np.dot(emb, ref_emb))
+                if sim > best_sim:
+                    best_sim = sim
+                    best_name = uname
+
+        # [4.2] Per-identity threshold (Verheyen ARES 2023): người dễ nhầm có ngưỡng
+        # riêng cao hơn do generate_embeddings.py tính, hiệu lực = max(global, riêng).
+        eff_threshold = self.threshold
+        if best_name != "Unknown":
+            per_id = float(self.database.get(best_name, {}).get("threshold", 0.0) or 0.0)
+            if per_id > eff_threshold:
+                eff_threshold = per_id
+        matched = (best_sim >= eff_threshold)
         if not matched:
             best_name = "Unknown"
-            
+
         return matched, best_name, float(best_sim), infer_ms
 
 class TemporalVoter:
     """
-    Bộ đếm phiếu chống nhiễu (Temporal Voting).
-    Yêu cầu n frame liên tiếp phải nhận diện ra cùng 1 người mới "chốt" kết quả.
+    Bộ đếm phiếu chống nhiễu (Temporal Voting) — chính sách "Tạm dừng khi Unknown".
+    Đồng bộ logic với firmware_esp32.ino (ESP32-S3):
+      - Cùng tên            -> cộng 1 phiếu.
+      - Tên khác            -> reset phiếu, bắt đầu đếm tên mới (tự sửa nhầm người).
+      - Unknown             -> KHÔNG reset ngay, chỉ tạm dừng tối đa max_unknown_pause
+                               frame; vượt ngưỡng mới reset (chống nhiễu ánh sáng
+                               làm đứt chuỗi phiếu của người thật).
+      - Unknown liên tiếp   -> đủ unknown_reject_votes frame -> trả về lock
+                               "Unknown" (ESP32 dùng để bíp REJECT; Laptop bỏ qua).
     """
-    def __init__(self, required_votes=5):
+    def __init__(self, required_votes=3, max_unknown_pause=2, unknown_reject_votes=3):
         self.required_votes = required_votes
+        self.max_unknown_pause = max_unknown_pause
+        self.unknown_reject_votes = unknown_reject_votes
         self.vote_name = None
         self.vote_count = 0
-        
+        self.unknown_streak = 0
+
     def vote(self, recognized_name, similarity, infer_ms):
         """
         Trả về (is_locked, tracked_name, tracked_sim, tracked_infer)
         Nếu chưa đủ phiếu, trả về (False, None, 0, 0)
         """
-        if recognized_name != "Unknown":
-            if recognized_name == self.vote_name:
-                self.vote_count += 1
-            else:
-                self.vote_name = recognized_name
-                self.vote_count = 1
+        if recognized_name == "Unknown":
+            self.unknown_streak += 1
+            if self.unknown_streak >= self.unknown_reject_votes:
+                # Chuỗi Unknown đủ dài -> tín hiệu REJECT (chỉ ESP32 dùng)
+                self.unknown_streak = 0
+                return True, "Unknown", similarity, infer_ms
+            if self.vote_name is not None and self.unknown_streak > self.max_unknown_pause:
+                # Unknown kéo dài quá ngưỡng tạm dừng -> hủy chuỗi phiếu cũ
+                self.vote_name = None
+                self.vote_count = 0
+            return False, None, 0.0, 0.0
 
-            if self.vote_count >= self.required_votes:
-                # Đủ phiếu
-                final_name = self.vote_name
-                self.reset()
-                return True, final_name, similarity, infer_ms
+        self.unknown_streak = 0
+        if recognized_name == self.vote_name:
+            self.vote_count += 1
         else:
+            self.vote_name = recognized_name
+            self.vote_count = 1
+
+        if self.vote_count >= self.required_votes:
+            # Đủ phiếu
+            final_name = self.vote_name
             self.reset()
-            
+            return True, final_name, similarity, infer_ms
+
         return False, None, 0.0, 0.0
-        
+
     def reset(self):
         self.vote_name = None
         self.vote_count = 0
+        self.unknown_streak = 0

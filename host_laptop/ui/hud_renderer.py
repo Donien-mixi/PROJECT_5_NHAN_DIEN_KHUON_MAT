@@ -19,7 +19,7 @@ class HUDRenderer:
         
         cv2.putText(frame, f"FPS: {fps:.1f}", (10, y_text), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 255), 2)
         
-        mode_text = "MESH(468p)" if detector_mode == "MEDIAPIPE_MESH" else "YUNET(5p)"
+        mode_text = "BLAZEFACE_INT8 128" if detector_mode == "BLAZEFACE_INT8" else "BLAZEFACE_INT8 128"
         col2_x = int(w * 0.20)
         cv2.putText(frame, f"AI: {mode_text}", (col2_x, y_text), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 200, 50), 2)
         
@@ -50,15 +50,10 @@ class HUDRenderer:
         box_color = (0, 255, 0) if matched else (0, 165, 255)
         cv2.rectangle(frame, (x, y), (x + w, y + h), box_color, 2)
         
-        # Vẽ điểm mốc
-        all_lm = face.get('all_landmarks', [])
-        if detector_mode == "MEDIAPIPE_MESH":
-            for (lx, ly) in all_lm:
-                cv2.circle(frame, (lx, ly), 1, (0, 255, 255), -1)
-        else:
-            for (lx, ly) in face.get('landmarks_5', []):
-                cv2.circle(frame, (lx, ly), 4, (0, 215, 255), -1)
-                cv2.circle(frame, (lx, ly), 6, (0, 255, 0), 1)
+        # Vẽ điểm mốc BlazeFace 5 điểm (đồng bộ ESP32, không dùng Mesh 468)
+        for (lx, ly) in face.get('landmarks_5', []):
+            cv2.circle(frame, (lx, ly), 4, (0, 215, 255), -1)
+            cv2.circle(frame, (lx, ly), 6, (0, 255, 0), 1)
                 
         # Vẽ tên
         label_str = f"MATCH: {recognized_name} ({similarity*100:.1f}%)" if matched else f"UNKNOWN ({similarity*100:.1f}%)"

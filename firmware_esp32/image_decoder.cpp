@@ -3,7 +3,7 @@
 
 // Callback function to decode JPEG pixels to g_frame_buffer
 bool jpeg_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-    if (y >= 240) return 0; // Kích thước khung hình ảnh là 240x240
+    if (y >= 128) return 0; // Kích thước khung hình ảnh là 128x128 (README.md:57)
     
     // Lưu vào g_frame_buffer cho AI xử lý (Core 0)
     if (g_frame_buffer) {
@@ -11,8 +11,8 @@ bool jpeg_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap)
             for (int i = 0; i < w; i++) {
                 int px = x + i;
                 int py = y + j;
-                if (px < 240 && py < 240) {
-                    g_frame_buffer[py * 240 + px] = bitmap[j * w + i];
+                if (px < 128 && py < 128) {
+                    g_frame_buffer[py * 128 + px] = bitmap[j * w + i];
                 }
             }
         }
@@ -30,5 +30,8 @@ void setup_image_decoder() {
 
 void decode_jpeg_frame(const uint8_t* jpeg_data, uint32_t length) {
     // Chỉ giải mã ảnh và lưu vào g_frame_buffer thông qua callback
-    TJpgDec.drawJpg(0, 0, jpeg_data, length);
+    int res = TJpgDec.drawJpg(0, 0, jpeg_data, length);
+    if (res != 0) {
+        Serial.printf("[JPEG] decode FAIL code=%d len=%lu\n", res, (unsigned long)length);
+    }
 }

@@ -1,3 +1,11 @@
+"""
+Dumb IP Camera — Gửi JPEG 128x128 RGB qua TCP 12345 tới ESP32 (HEADLESS, không cửa sổ)
+Chuẩn: README.md:3,161,178,247 + mo_ta_project.md:30
+- Chỉ resize 1 lần duy nhất ở streamer: center crop → 128x128 (không detect/crop mặt ở Laptop)
+- KHÔNG mở cửa sổ OpenCV: Laptop chỉ là camera; kết quả điểm danh báo bằng
+  Serial Monitor + 2 LED + Buzzer trên ESP32 (README.md:3,247)
+- Dừng bằng Ctrl+C
+"""
 import cv2
 import socket
 import argparse
@@ -6,84 +14,85 @@ import struct
 import sys
 import os
 
-# Thêm đường dẫn để import được module detector
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from detector.blazeface_esp32 import UnifiedFaceDetector as FaceDetector
+from host_laptop.core.vision_utils import center_crop_to_raw
 
-def stream_camera(ip, port, resolution=(240, 240), quality=50):
-    # Cấu hình Socket TCP
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    print(f"Đang kết nối tới ESP32 tại {ip}:{port}...")
-    try:
-        sock.connect((ip, port))
-        print("✅ Kết nối TCP thành công!")
-    except Exception as e:
-        print(f"❌ Không thể kết nối tới ESP32: {e}")
-        print("Vui lòng đảm bảo ESP32 đã khởi động và in ra 'Listening on TCP port...'")
-        return
-        
-    print(f"🚀 Bắt đầu phát luồng video tới ESP32 tại {ip}:{port}")
-    print(f"Độ phân giải gửi: 64x64 (Đã qua xử lý Affine Alignment)")
-    print("Nhấn Ctrl+C để thoát...")
-    
+def stream_camera(ip, port, resolution=(128, 128), quality=80):
+    print(f"🚀 Streaming JPEG {resolution[0]}x{resolution[1]} quality={quality} qua TCP {port} (headless)")
+    print("Kết quả điểm danh xem trên Serial Monitor ESP32 (115200) + 2 LED + Buzzer. Nhấn Ctrl+C để thoát.")
+
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
-    
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     if not cap.isOpened():
-        print("Lỗi: Không thể mở camera trên Laptop")
+        cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("❌ Không mở được webcam")
         return
-        
-    # Laptop bây giờ chỉ đóng vai trò là Camera IP (Dumb Camera)
-    # Không thực hiện nhận diện hay cắt ảnh nữa, gửi thẳng 240x240 xuống ESP32
-    print(f"Đang chuẩn bị gửi nguyên khung hình thô {resolution[0]}x{resolution[1]} xuống ESP32...")
-        
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Khử độ trễ đệm 4-5 frame nội bộ của OpenCV DirectShow
+
+    sock = None
+    frames = 0
     try:
         while True:
+            # Kết nối / tự kết nối lại khi ESP32 restart hoặc mất kết nối
+            if sock is None:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Tắt Nagle algorithm, gửi gói ngay
+                print(f"Đang kết nối tới ESP32 TCP {ip}:{port}...")
+                try:
+                    sock.connect((ip, port))
+                    print("✅ TCP connected!")
+                except Exception as e:
+                    print(f"❌ Chưa kết nối được ({e}) — thử lại sau 3s...")
+                    sock.close()
+                    sock = None
+                    time.sleep(3)
+                    continue
+
             ret, frame = cap.read()
             if not ret:
                 break
-                
-            # Resize khung hình về 240x240 (vuông) để tiết kiệm băng thông TCP
-            # Bạn có thể cắt ở giữa (Center crop) nếu muốn không bị méo tỉ lệ
-            h, w = frame.shape[:2]
-            size = min(h, w)
-            y_start = (h - size) // 2
-            x_start = (w - size) // 2
-            cropped_frame = frame[y_start:y_start+size, x_start:x_start+size]
-            resized_frame = cv2.resize(cropped_frame, resolution)
-            
-            # Hiển thị trên Laptop để xem
-            cv2.imshow("Raw Frame (Streaming to ESP32)", resized_frame)
-            cv2.waitKey(1)
-            
-            # Nén ảnh thành JPEG
-            ret, buffer = cv2.imencode('.jpg', resized_frame, encode_param)
-            
-            if ret:
-                data = buffer.tobytes()
-                # Gửi bằng TCP: Gửi 4 bytes độ dài trước, sau đó gửi data
+            # Bỏ ~15 frame đầu (~0.5-1s) để webcam auto-exposure ổn định,
+            # tránh gửi frame quá sáng/quá tối làm điểm số thấp ở lượt nhận diện đầu
+            frames += 1
+            if frames <= 15:
+                continue
+            # Center crop vuông rồi resize 128x128 — duy nhất 1 lần (dùng chung vision_utils)
+            resized = center_crop_to_raw(frame, resolution[0])
+            if resized is None:
+                continue
+
+            ok, buf = cv2.imencode('.jpg', resized, encode_param)
+            if ok:
+                data = buf.tobytes()
                 try:
                     sock.sendall(struct.pack('<I', len(data)))
                     sock.sendall(data)
-                    print(f"Đang gửi {len(data)} bytes (JPEG {resolution[0]}x{resolution[1]}) qua TCP...", end='\r')
+                    if frames % 15 == 0:  # in 1 lần/giây thay vì spam mỗi frame
+                        print(f"→ đã gửi {frames} frame JPEG 128x128 TCP")
                 except Exception as e:
-                    print(f"\n❌ Lỗi gửi mạng (Có thể ESP32 ngắt kết nối): {e}")
-                    break
-                    
-            # Khống chế FPS (Truyền 10-15 FPS là đủ mượt cho ESP32)
+                    # ESP32 restart/đứt kết nối — đóng socket và tự kết nối lại,
+                    # KHÔNG thoát chương trình (tự hồi phục)
+                    print(f"\n⚠️ Mất kết nối ({e}) — sẽ tự kết nối lại...")
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+                    sock = None
+                    time.sleep(1)
             time.sleep(1/15.0)
-            
     except KeyboardInterrupt:
-        print("\nĐã dừng luồng Camera IP.")
+        print("\nĐã dừng.")
     finally:
         cap.release()
-        cv2.destroyAllWindows()
-        sock.close()
+        if sock is not None:
+            sock.close()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Laptop IP Camera Streamer cho ESP32")
-    parser.add_argument("--ip", type=str, default="192.168.1.100", help="Địa chỉ IP tĩnh của board ESP32")
-    parser.add_argument("--port", type=int, default=12345, help="Port UDP lắng nghe trên ESP32")
+    parser = argparse.ArgumentParser(description="Dumb IP Camera 128 TCP 12345")
+    parser.add_argument("--ip", type=str, default="192.168.1.100", help="IP ESP32")
+    parser.add_argument("--port", type=int, default=12345, help="Port TCP (mặc định 12345)")
     args = parser.parse_args()
-    
     stream_camera(args.ip, args.port)

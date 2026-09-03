@@ -3,9 +3,10 @@
 #include <math.h>
 
 // TFLite Micro Headers
-#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/schema/schema_generated.h"
+#include "esp_nn_glue.h"
 #include "model_data.h"
 #include "face_database.h"
 #include "ai_config.h"
@@ -24,18 +25,15 @@ const int EMBEDDING_SIZE = 128;
 
 void setup_face_recognizer() {
     Serial.println("Khoi tao TFLite Micro Face Recognizer...");
-    
-    // Cố gắng cấp phát Tensor Arena trên INTERNAL SRAM để đạt tốc độ tối đa (rất nhanh)
-    uint8_t* raw_arena = (uint8_t*)heap_caps_malloc(RECOGNIZER_ARENA_SIZE + 16, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!raw_arena) {
-        Serial.printf("❌ Cảnh báo: Không đủ Internal SRAM cho Recognizer (%d bytes)! Đang chuyển sang PSRAM...\n", RECOGNIZER_ARENA_SIZE);
-        raw_arena = (uint8_t*)heap_caps_malloc(RECOGNIZER_ARENA_SIZE + 16, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    
+    // [4.1 REALTIME] Arena PSRAM lớn (1.75MB) vì esp-nn cần scratch buffer = bản sao
+    // filter đã align (~bằng tổng weights model) ngoài 187KB activations.
+    // SRAM nội 512KB không đủ chứa arena này — PSRAM 8MB dư nhiều.
+    uint8_t* raw_arena = (uint8_t*)heap_caps_malloc(RECOGNIZER_ARENA_SIZE + 16, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
     if (!raw_arena) {
         Serial.println("FATAL: Failed to allocate tensor arena!");
         return;
-    }  
+    }
     
     // Căn lề 16 bytes
     tensor_arena = (uint8_t*)(((uintptr_t)raw_arena + 15) & ~15);
@@ -48,19 +46,43 @@ void setup_face_recognizer() {
     static tflite::MicroErrorReporter micro_error_reporter;
     tflite::ErrorReporter* error_reporter = &micro_error_reporter;
 
-    static tflite::AllOpsResolver resolver;
+    // Resolver theo audit model thật (Recognizer ops: CONV_2D, DEPTHWISE_CONV_2D, ADD,
+    // CONCATENATION, FULLY_CONNECTED — không có RESHAPE; ReLU/BatchNorm đã fused).
+    static tflite::MicroMutableOpResolver<5> resolver;
+#if AI_ESP_NN_CONV_REC
+    // [4.1 REALTIME] CONV_2D + DEPTHWISE_CONV_2D chạy kernel SIMD esp-nn
+    resolver.AddConv2D(ai_esp_nn::Register_CONV_2D_ESPNN());
+    resolver.AddDepthwiseConv2D(ai_esp_nn::Register_DEPTHWISE_CONV_2D_ESPNN());
+#else
+    resolver.AddConv2D();
+    resolver.AddDepthwiseConv2D();
+#endif
+    resolver.AddAdd();
+    resolver.AddConcatenation();
+    resolver.AddFullyConnected();
     static tflite::MicroInterpreter static_interpreter(
         model, resolver, tensor_arena, RECOGNIZER_ARENA_SIZE, error_reporter);
     
     interpreter = &static_interpreter;
     if (interpreter->AllocateTensors() != kTfLiteOk) {
-        Serial.println("AllocateTensors() failed");
+        Serial.println("[Recognizer] AllocateTensors() FAILED");
+        Serial.printf("[Recognizer] Need | Arena: %d / %d\n", interpreter->arena_used_bytes(), RECOGNIZER_ARENA_SIZE);
         return;
     }
 
     input = interpreter->input(0);
     output = interpreter->output(0);
+    Serial.printf("[Recognizer] Arena used %d / %d\n", interpreter->arena_used_bytes(), RECOGNIZER_ARENA_SIZE);
     Serial.println(">>> TFLite Micro Model da nap thanh cong vao PSRAM!");
+#if AI_ESP_NN_CONV_REC
+    Serial.println(">>> ESP-NN SIMD (recognizer): BAT — realtime mode");
+#else
+    Serial.println(">>> ESP-NN SIMD (recognizer): TAT (kernel stock)");
+#endif
+#if (AI_ESP_NN_CONV_DET || AI_ESP_NN_CONV_REC) && RUN_ESPNN_SELFTEST
+    // [CHẨN ĐOÁN] Self-test esp-nn vs reference — phải PASS (maxdiff=0)
+    ai_esp_nn::EspNnSelfTest();
+#endif
 }
 
 void extract_face_embedding(const float* input_tensor, float* output_embedding) {
@@ -137,20 +159,43 @@ float cosine_similarity(const float* a, const float* b, int size) {
 }
 
 const char* identify_face(const float* face_embedding, float threshold) {
-    const char* best_match = "Unknown";
+    // Multi-template MAX-SIM (đồng bộ Laptop face_recognizer.py):
+    // 1) Tìm template có điểm cao nhất qua TẤT CẢ người (argmax trước).
+    // 2) Áp ngưỡng per-identity (4.2, Verheyen ARES 2023): người dễ nhầm với người khác
+    //    có ngưỡng riêng cao hơn (được generate_embeddings.py tính và lưu trong struct),
+    //    hiệu lực = max(ngưỡng global 0.60, ngưỡng riêng) → FAR ổn định khi DB dày lên.
+    int best_i = -1;
     float best_score = -1.0f;
-    
+
     for (int i = 0; i < NUM_REGISTERED_FACES; i++) {
-        float score = cosine_similarity(face_embedding, FACE_DATABASE[i].embedding, EMBEDDING_SIZE);
-        if (score > best_score) {
-            best_score = score;
-            if (score >= threshold) {
-                best_match = FACE_DATABASE[i].name;
+        int n = FACE_DATABASE[i].num_templates;
+        if (n <= 0) n = 1; // an toàn cho DB cũ centroid
+        for (int t = 0; t < n; t++) {
+            float score = cosine_similarity(face_embedding, FACE_DATABASE[i].embeddings[t], EMBEDDING_SIZE);
+            if (score > best_score) {
+                best_score = score;
+                best_i = i;
             }
         }
     }
-    
-    // Xóa bớt log spam, chỉ để lại 1 dòng báo cáo gọn nhẹ
-    Serial.printf("🔍 [AI] Frame hiện tại: %s (Độ tin cậy: %.2f)\n", best_match, best_score);
-    return best_match;
+
+    if (best_i >= 0) {
+        float eff_threshold = threshold;
+        if (FACE_DATABASE[best_i].threshold > eff_threshold) {
+            eff_threshold = FACE_DATABASE[best_i].threshold;
+        }
+        // Log chi tiết để chẩn đoán ngưỡng thấp: luôn in best_match dù Unknown
+        if (best_score >= eff_threshold) {
+            Serial.printf("🔍 [AI] Frame hiện tại: %s (Độ tin cậy: %.2f, ngưỡng %.2f)\n",
+                          FACE_DATABASE[best_i].name, best_score, eff_threshold);
+            return FACE_DATABASE[best_i].name;
+        } else {
+            Serial.printf("🔍 [AI] Frame hiện tại: Unknown (best %s %.2f < ngưỡng %.2f)\n",
+                          FACE_DATABASE[best_i].name, best_score, eff_threshold);
+            return "Unknown";
+        }
+    }
+
+    Serial.printf("🔍 [AI] Frame hiện tại: Unknown (Độ tin cậy: %.2f)\n", best_score);
+    return "Unknown";
 }

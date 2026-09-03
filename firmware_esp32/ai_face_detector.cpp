@@ -1,409 +1,325 @@
 #include "ai_face_detector.h"
 #include <Arduino.h>
 #include <math.h>
-#include <TJpg_Decoder.h>
+#include <vector>
 #include "ai_config.h"
-
-// Thêm TFLite headers
-#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "esp_nn_glue.h"
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/micro/micro_error_reporter.h"
+#include "tensorflow/lite/schema/schema_generated.h"
 #include "detector_model_data.h"
 
-// Bộ đệm lưu trữ toàn bộ ảnh sau khi giải mã từ JPEG (240x240 RGB565)
-// Kích thước: 240 * 240 * 2 = 115,200 bytes (~112KB)
 uint16_t* g_frame_buffer = nullptr;
-static const int FRAME_WIDTH = 240;
-static const int FRAME_HEIGHT = 240;
+// [PERF] 4.1 — thời gian từng chặng preprocess (micros), cập nhật mỗi lần gọi
+unsigned long g_us_bilinear = 0;
+unsigned long g_us_he = 0;
 
-// Variables cho Face Detector (BlazeFace 128x128)
 const tflite::Model* detector_model = nullptr;
 tflite::MicroInterpreter* detector_interpreter = nullptr;
 TfLiteTensor* detector_input = nullptr;
-
-// Mô hình Float32 Weight Quantized BlazeFace cần nhiều Arena hơn so với model UINT8.
-// Kích thước Arena được quản lý động bởi ai_config.h từ AI Module.
+TfLiteTensor* detector_output_scores = nullptr;
+TfLiteTensor* detector_output_boxes = nullptr;
 uint8_t* g_detector_tensor_arena = nullptr;
+std::vector<std::pair<float,float>> g_anchors;
+static float g_ema_cx = -1.0f;
+static float g_ema_cy = -1.0f;
+static float g_ema_w = -1.0f;
+static float g_ema_h = -1.0f;
+static constexpr float kEmaAlpha = 0.35f;
 
-struct Anchor { float x, y; };
-std::vector<Anchor> g_anchors;
+static float sigmoid_f(float x){
+    x = max(-80.0f, min(80.0f, x));
+    return 1.0f / (1.0f + expf(-x));
+}
 
-void setup_face_detector() {
-    Serial.println("Khoi tao Face Preprocessing & Detector (BlazeFace)...");
-    
-    // Cấp phát Frame Buffer trên PSRAM
-    g_frame_buffer = (uint16_t*)heap_caps_malloc(FRAME_WIDTH * FRAME_HEIGHT * 2, MALLOC_CAP_SPIRAM);
-    if (!g_frame_buffer) {
-        Serial.println("FATAL ERROR: Không thể cấp phát Frame Buffer trên PSRAM!");
+static float tensor_value(const TfLiteTensor* tensor, int index){
+    switch(tensor->type){
+        case kTfLiteFloat32:
+            return tensor->data.f[index];
+        case kTfLiteInt8:
+            return (tensor->data.int8[index] - tensor->params.zero_point) * tensor->params.scale;
+        case kTfLiteUInt8:
+            return (tensor->data.uint8[index] - tensor->params.zero_point) * tensor->params.scale;
+        default:
+            return NAN;
+    }
+}
+
+static void reset_ema(){
+    g_ema_cx = g_ema_cy = g_ema_w = g_ema_h = -1.0f;
+}
+
+void setup_face_detector(){
+    Serial.println("Khoi tao BlazeFace 128...");
+    g_frame_buffer = (uint16_t*)heap_caps_malloc(FRAME_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if(!g_frame_buffer){ Serial.println("FATAL: Frame buffer PSRAM fail"); return; }
+    Serial.println("Frame buffer 32KB PSRAM OK");
+
+    uint8_t* raw_arena = (uint8_t*)heap_caps_malloc(DETECTOR_ARENA_SIZE + 16, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if(!raw_arena){ Serial.println("FATAL: Detector arena PSRAM fail"); return; }
+    g_detector_tensor_arena = (uint8_t*)(((uintptr_t)raw_arena + 15) & ~15);
+    detector_model = tflite::GetModel(g_detector_model);
+    if(detector_model->version()!=TFLITE_SCHEMA_VERSION){ Serial.println("Model version mismatch"); return; }
+    // Resolver đăng ký ĐỦ ops theo audit model thật (quantize_detector_int8.py):
+    // ADD, CONCATENATION, CONV_2D, DEPTHWISE_CONV_2D, MAX_POOL_2D, PAD, RESHAPE.
+    // Model BlazeFace hiện là FULL INT8 (ReLU đã fused, không còn DEQUANTIZE).
+    static tflite::MicroErrorReporter reporter;
+    static tflite::MicroMutableOpResolver<7> resolver;
+#if AI_ESP_NN_CONV_DET
+    // [4.1 REALTIME] CONV_2D + DEPTHWISE_CONV_2D chạy kernel SIMD esp-nn (Xtensa LX7)
+    resolver.AddConv2D(ai_esp_nn::Register_CONV_2D_ESPNN());
+    resolver.AddDepthwiseConv2D(ai_esp_nn::Register_DEPTHWISE_CONV_2D_ESPNN());
+#else
+    resolver.AddConv2D();
+    resolver.AddDepthwiseConv2D();
+#endif
+    resolver.AddAdd();
+    resolver.AddConcatenation();
+    resolver.AddMaxPool2D();
+    resolver.AddPad();
+    resolver.AddReshape();
+    static tflite::MicroInterpreter interp(detector_model, resolver, g_detector_tensor_arena, DETECTOR_ARENA_SIZE, &reporter);
+    detector_interpreter = &interp;
+    if(detector_interpreter->AllocateTensors()!=kTfLiteOk){
+        Serial.println("[Detector] AllocateTensors FAILED");
+    Serial.printf("[Detector] Arena used %d / %d\n", detector_interpreter->arena_used_bytes(), DETECTOR_ARENA_SIZE);
+#if AI_ESP_NN_CONV_DET
+    Serial.println("[Detector] ESP-NN SIMD: BAT");
+#else
+    Serial.println("[Detector] ESP-NN SIMD: TAT (kernel stock)");
+#endif
+        return;
+    }
+    detector_input = detector_interpreter->input(0);
+    // TFLite có thể xếp regressors trước classificators hoặc ngược lại.
+    TfLiteTensor* output0 = detector_interpreter->output(0);
+    TfLiteTensor* output1 = detector_interpreter->output(1);
+    int output0_last_dim = output0->dims->data[output0->dims->size - 1];
+    if(output0_last_dim == 1){
+        detector_output_scores = output0;
+        detector_output_boxes = output1;
     } else {
-        Serial.println("Đã cấp phát 112KB PSRAM cho Frame Buffer.");
+        detector_output_scores = output1;
+        detector_output_boxes = output0;
     }
-    
-    // Khởi tạo Tensor Arena cho Detector
-    // Cấp phát trong bộ nhớ nội bộ (Internal SRAM) nếu có thể, nếu không đủ sẽ chuyển qua PSRAM.
-    uint8_t* raw_arena = (uint8_t*)heap_caps_malloc(DETECTOR_ARENA_SIZE + 16, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!raw_arena) {
-        Serial.println("⚠️ Cảnh báo: Không đủ Internal SRAM cho BlazeFace! Đang chuyển sang PSRAM (chậm hơn)...");
-        raw_arena = (uint8_t*)heap_caps_malloc(DETECTOR_ARENA_SIZE + 16, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    
-    if (raw_arena) {
-        g_detector_tensor_arena = (uint8_t*)(((uintptr_t)raw_arena + 15) & ~15);
-        detector_model = tflite::GetModel(g_detector_model);
-        
-        static tflite::MicroErrorReporter micro_error_reporter;
-        static tflite::AllOpsResolver resolver;
-        static tflite::MicroInterpreter static_interpreter(
-            detector_model, resolver, g_detector_tensor_arena, DETECTOR_ARENA_SIZE, &micro_error_reporter);
-            
-        detector_interpreter = &static_interpreter;
-        if (detector_interpreter->AllocateTensors() == kTfLiteOk) {
-            detector_input = detector_interpreter->input(0);
-            Serial.println("Detector AllocateTensors() successful");
-            Serial.printf("[BlazeFace] Arena size used: %d bytes\n", detector_interpreter->arena_used_bytes());
-        } else {
-            Serial.println("Detector AllocateTensors() failed");
-        }
-    }
-    
-    // Tạo 896 Anchors cho BlazeFace
+    Serial.printf("[Detector] Arena used %d / %d\n", detector_interpreter->arena_used_bytes(), DETECTOR_ARENA_SIZE);
+
+    // 896 anchors 16x16*2 + 8x8*6
     g_anchors.clear();
-    // 16x16 feature map
-    for (int y = 0; y < 16; ++y) {
-        for (int x = 0; x < 16; ++x) {
-            float cx = (x + 0.5f) / 16.0f;
-            float cy = (y + 0.5f) / 16.0f;
-            g_anchors.push_back({cx, cy});
-            g_anchors.push_back({cx, cy});
-        }
-    }
-    // 8x8 feature map
-    for (int y = 0; y < 8; ++y) {
-        for (int x = 0; x < 8; ++x) {
-            float cx = (x + 0.5f) / 8.0f;
-            float cy = (y + 0.5f) / 8.0f;
-            for (int i = 0; i < 6; ++i) g_anchors.push_back({cx, cy});
-        }
-    }
+    for(int y=0;y<16;++y) for(int x=0;x<16;++x){ float cx=(x+0.5f)/16, cy=(y+0.5f)/16; g_anchors.push_back({cx,cy}); g_anchors.push_back({cx,cy}); }
+    for(int y=0;y<8;++y) for(int x=0;x<8;++x){ float cx=(x+0.5f)/8, cy=(y+0.5f)/8; for(int i=0;i<6;++i) g_anchors.push_back({cx,cy}); }
 }
 
-// Callback của TJpgDec: Chép từng block ảnh đã giải mã vào Frame Buffer tổng
-bool tjpg_decode_callback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-    if (!g_frame_buffer) return false;
-    
-    for (int j = 0; j < h; j++) {
-        for (int i = 0; i < w; i++) {
-            int px = x + i;
-            int py = y + j;
-            if (px < FRAME_WIDTH && py < FRAME_HEIGHT) {
-                g_frame_buffer[py * FRAME_WIDTH + px] = bitmap[j * w + i];
-            }
-        }
-    }
-    return true;
-}
-
-// Hàm chạy suy luận TFLite để tìm khuôn mặt
-FaceBox detect_face() {
-    FaceBox box;
+FaceBox detect_face(){
+    FaceBox box{};
     box.is_valid = false;
-    
-    if (!g_frame_buffer) {
-        Serial.println("[AI LỖI] Frame Buffer chưa sẵn sàng!");
-        return box;
-    }
-    
-    Serial.println("[AITask] Đã vào detect_face(). Chuẩn bị Bilinear Interpolation...");
-    
-    // Ảnh ĐÃ ĐƯỢC GIẢI MÃ BỞI NetTask và lưu vào g_frame_buffer.
-    // Chúng ta không gọi TJpgDec.drawJpg ở đây nữa để tránh xung đột đa luồng!
-    
-    if (!detector_interpreter || !detector_input) {
-        Serial.println("[AI LỖI] BlazeFace chưa được khởi tạo!");
-        return box;
-    }
-    
-    // Bước 2: Chuẩn bị input 128x128 cho BlazeFace bằng Bilinear (từ 240x240)
-    const int TARGET_SIZE = 128;
-    float scale = (float)FRAME_WIDTH / TARGET_SIZE;
-    
-    for (int y = 0; y < TARGET_SIZE; y++) {
-        for (int x = 0; x < TARGET_SIZE; x++) {
-            float src_x = x * scale;
-            float src_y = y * scale;
-            int x1 = (int)src_x;
-            int y1 = (int)src_y;
-            int x2 = min(x1 + 1, FRAME_WIDTH - 1);
-            int y2 = min(y1 + 1, FRAME_HEIGHT - 1);
-            float wx = src_x - x1;
-            float wy = src_y - y1;
-            
-            auto get_rgb = [](uint16_t c, uint8_t& r, uint8_t& g, uint8_t& b) {
-                r = (c >> 11) << 3;
-                g = ((c >> 5) & 0x3F) << 2;
-                b = (c & 0x1F) << 3;
-            };
-            
-            uint8_t r11, g11, b11, r21, g21, b21, r12, g12, b12, r22, g22, b22;
-            get_rgb(g_frame_buffer[y1 * FRAME_WIDTH + x1], r11, g11, b11);
-            get_rgb(g_frame_buffer[y1 * FRAME_WIDTH + x2], r21, g21, b21);
-            get_rgb(g_frame_buffer[y2 * FRAME_WIDTH + x1], r12, g12, b12);
-            get_rgb(g_frame_buffer[y2 * FRAME_WIDTH + x2], r22, g22, b22);
-            
-            float rf = r11*(1-wx)*(1-wy) + r21*wx*(1-wy) + r12*(1-wx)*wy + r22*wx*wy;
-            float gf = g11*(1-wx)*(1-wy) + g21*wx*(1-wy) + g12*(1-wx)*wy + g22*wx*wy;
-            float bf = b11*(1-wx)*(1-wy) + b21*wx*(1-wy) + b12*(1-wx)*wy + b22*wx*wy;
-            
-            // Normalize [-1.0, 1.0]
-            int idx = (y * TARGET_SIZE + x) * 3;
-            if (detector_input->type == kTfLiteFloat32) {
-                detector_input->data.f[idx + 0] = (rf - 127.5f) / 128.0f;
-                detector_input->data.f[idx + 1] = (gf - 127.5f) / 128.0f;
-                detector_input->data.f[idx + 2] = (bf - 127.5f) / 128.0f;
-            } else if (detector_input->type == kTfLiteInt8) {
-                detector_input->data.int8[idx + 0] = (int8_t)(((rf - 127.5f) / 128.0f) / detector_input->params.scale + detector_input->params.zero_point);
-                detector_input->data.int8[idx + 1] = (int8_t)(((gf - 127.5f) / 128.0f) / detector_input->params.scale + detector_input->params.zero_point);
-                detector_input->data.int8[idx + 2] = (int8_t)(((bf - 127.5f) / 128.0f) / detector_input->params.scale + detector_input->params.zero_point);
-            } else if (detector_input->type == kTfLiteUInt8) {
-                detector_input->data.uint8[idx + 0] = (uint8_t)(((rf - 127.5f) / 128.0f) / detector_input->params.scale + detector_input->params.zero_point);
-                detector_input->data.uint8[idx + 1] = (uint8_t)(((gf - 127.5f) / 128.0f) / detector_input->params.scale + detector_input->params.zero_point);
-                detector_input->data.uint8[idx + 2] = (uint8_t)(((bf - 127.5f) / 128.0f) / detector_input->params.scale + detector_input->params.zero_point);
+    if(!g_frame_buffer || !detector_interpreter || !detector_input ||
+       !detector_output_scores || !detector_output_boxes) return box;
+
+    // Chuẩn bị input RAW 128x128 RGB, normalize [(pixel - 127.5) / 128].
+    // Với model quantized, lượng tử hóa tensor đã normalize giống emulator Python.
+    const float input_scale = detector_input->params.scale;
+    const int input_zero_point = detector_input->params.zero_point;
+    for(int y = 0; y < RAW_FRAME_SIZE; ++y){
+        for(int x = 0; x < RAW_FRAME_SIZE; ++x){
+            uint16_t c = g_frame_buffer[y * RAW_FRAME_SIZE + x];
+            uint8_t r = ((c>>11)&0x1F)<<3;
+            uint8_t g = ((c>>5)&0x3F)<<2;
+            uint8_t b = (c&0x1F)<<3;
+            int idx = (y * RAW_FRAME_SIZE + x) * 3;
+            float rf = (r - 127.5f)/128.0f;
+            float gf = (g - 127.5f)/128.0f;
+            float bf = (b - 127.5f)/128.0f;
+            if(detector_input->type == kTfLiteFloat32){
+                detector_input->data.f[idx + 0] = rf;
+                detector_input->data.f[idx + 1] = gf;
+                detector_input->data.f[idx + 2] = bf;
+            } else if(detector_input->type == kTfLiteInt8 && input_scale > 0.0f){
+                detector_input->data.int8[idx + 0] = (int8_t)max(-128, min(127, (int)roundf(rf / input_scale + input_zero_point)));
+                detector_input->data.int8[idx + 1] = (int8_t)max(-128, min(127, (int)roundf(gf / input_scale + input_zero_point)));
+                detector_input->data.int8[idx + 2] = (int8_t)max(-128, min(127, (int)roundf(bf / input_scale + input_zero_point)));
+            } else if(detector_input->type == kTfLiteUInt8 && input_scale > 0.0f){
+                detector_input->data.uint8[idx + 0] = (uint8_t)max(0, min(255, (int)roundf(rf / input_scale + input_zero_point)));
+                detector_input->data.uint8[idx + 1] = (uint8_t)max(0, min(255, (int)roundf(gf / input_scale + input_zero_point)));
+                detector_input->data.uint8[idx + 2] = (uint8_t)max(0, min(255, (int)roundf(bf / input_scale + input_zero_point)));
             } else {
-                Serial.println("[AI LỖI] Model mới yêu cầu kTfLiteFloat32, kTfLiteInt8 hoặc kTfLiteUInt8 input!");
+                return box;
             }
         }
     }
-    
-    // Bước 3: Chạy Suy Luận
-    Serial.println("[AITask] Bắt đầu gọi BlazeFace Invoke()...");
-    if (detector_interpreter->Invoke() != kTfLiteOk) {
-        Serial.println("[AI LỖI] BlazeFace Invoke thất bại!");
+    if(detector_interpreter->Invoke()!=kTfLiteOk){ return box; }
+
+    // Decode score cao nhất. Regressor có stride 16, nhưng chỉ 4 giá trị đầu
+    // là (x_center, y_center, width, height) theo pixel BlazeFace.
+    float best_score = -1.0f;
+    int best_idx = -1;
+    for(int i = 0; i < (int)g_anchors.size(); ++i){
+        float score = sigmoid_f(tensor_value(detector_output_scores, i));
+        if(score > best_score){
+            best_score = score;
+            best_idx = i;
+        }
+    }
+    if(best_score < DETECTOR_CONF_THRESH || best_idx < 0){
+        reset_ema();
         return box;
     }
-    Serial.println("[AITask] BlazeFace Invoke() thành công!");
-    
-    // Bước 4: Giải mã các Tensor (Hỗ trợ model 2 tensor Float32 chuẩn hoặc 4 tensor Quantized)
-    int num_outputs = detector_interpreter->outputs_size();
-    float max_score = 0.0f;
-    int best_anchor = -1;
-    bool is_8x8 = false;
-    float best_dx = 0, best_dy = 0, best_w = 0, best_h = 0;
-    
-    if (num_outputs == 4) {
-        // Mô hình chia thành 4 Tensors
-        TfLiteTensor* reg_16 = detector_interpreter->output(0);
-        TfLiteTensor* cls_16 = detector_interpreter->output(1);
-        TfLiteTensor* reg_8  = detector_interpreter->output(2);
-        TfLiteTensor* cls_8  = detector_interpreter->output(3);
-        
-        for (int i = 0; i < 512; i++) {
-            float score = 0.0f;
-            if (cls_16->type == kTfLiteFloat32) { score = 1.0f / (1.0f + exp(-cls_16->data.f[i])); }
-            else if (cls_16->type == kTfLiteUInt8) { 
-                if (cls_16->data.uint8[i] == 255) score = 0.95f; 
-                else score = 1.0f / (1.0f + exp(-((cls_16->data.uint8[i] - cls_16->params.zero_point) * cls_16->params.scale))); 
-            }
-            else if (cls_16->type == kTfLiteInt8) { score = 1.0f / (1.0f + exp(-((cls_16->data.int8[i] - cls_16->params.zero_point) * cls_16->params.scale))); }
-            if (score > max_score) { max_score = score; best_anchor = i; is_8x8 = false; }
-        }
-        for (int i = 0; i < 384; i++) {
-            float score = 0.0f;
-            if (cls_8->type == kTfLiteFloat32) { score = 1.0f / (1.0f + exp(-cls_8->data.f[i])); }
-            else if (cls_8->type == kTfLiteUInt8) { 
-                if (cls_8->data.uint8[i] == 255) score = 0.95f; 
-                else score = 1.0f / (1.0f + exp(-((cls_8->data.uint8[i] - cls_8->params.zero_point) * cls_8->params.scale))); 
-            }
-            else if (cls_8->type == kTfLiteInt8) { score = 1.0f / (1.0f + exp(-((cls_8->data.int8[i] - cls_8->params.zero_point) * cls_8->params.scale))); }
-            if (score > max_score) { max_score = score; best_anchor = i; is_8x8 = true; }
-        }
-        
-        if (max_score >= 0.60f && best_anchor >= 0) {
-            TfLiteTensor* reg = is_8x8 ? reg_8 : reg_16;
-            if (reg->type == kTfLiteFloat32) {
-                best_dx = reg->data.f[best_anchor * 16 + 0];
-                best_dy = reg->data.f[best_anchor * 16 + 1];
-                best_w  = reg->data.f[best_anchor * 16 + 2];
-                best_h  = reg->data.f[best_anchor * 16 + 3];
-            } else if (reg->type == kTfLiteUInt8) {
-                best_dx = (reg->data.uint8[best_anchor * 16 + 0] - reg->params.zero_point) * reg->params.scale;
-                best_dy = (reg->data.uint8[best_anchor * 16 + 1] - reg->params.zero_point) * reg->params.scale;
-                best_w  = (reg->data.uint8[best_anchor * 16 + 2] - reg->params.zero_point) * reg->params.scale;
-                best_h  = (reg->data.uint8[best_anchor * 16 + 3] - reg->params.zero_point) * reg->params.scale;
-            } else if (reg->type == kTfLiteInt8) {
-                best_dx = (reg->data.int8[best_anchor * 16 + 0] - reg->params.zero_point) * reg->params.scale;
-                best_dy = (reg->data.int8[best_anchor * 16 + 1] - reg->params.zero_point) * reg->params.scale;
-                best_w  = (reg->data.int8[best_anchor * 16 + 2] - reg->params.zero_point) * reg->params.scale;
-                best_h  = (reg->data.int8[best_anchor * 16 + 3] - reg->params.zero_point) * reg->params.scale;
-            }
-            if (is_8x8) best_anchor += 512; // Cập nhật global anchor idx
-        }
-    } else if (num_outputs == 2) {
-        // Mô hình gộp thành 2 Tensors (Chuẩn)
-        TfLiteTensor* reg = detector_interpreter->output(0);
-        TfLiteTensor* cls = detector_interpreter->output(1);
-        
-        // Tự động hoán đổi nếu model xuất cls ở index 0
-        if (reg->dims->data[reg->dims->size - 1] == 1) { 
-            TfLiteTensor* temp = reg;
-            reg = cls;
-            cls = temp;
-        }
-        
-        for (int i = 0; i < 896; i++) {
-            float score = 0.0f;
-            if (cls->type == kTfLiteFloat32) {
-                score = 1.0f / (1.0f + exp(-cls->data.f[i]));
-            } else if (cls->type == kTfLiteUInt8) {
-                if (cls->data.uint8[i] == 255) score = 0.95f;
-                else score = 1.0f / (1.0f + exp(-((cls->data.uint8[i] - cls->params.zero_point) * cls->params.scale)));
-            } else if (cls->type == kTfLiteInt8) {
-                score = 1.0f / (1.0f + exp(-((cls->data.int8[i] - cls->params.zero_point) * cls->params.scale)));
-            }
-            if (score > max_score) { max_score = score; best_anchor = i; }
-        }
-        
-        if (max_score >= 0.60f && best_anchor >= 0) {
-            if (reg->type == kTfLiteFloat32) {
-                best_dx = reg->data.f[best_anchor * 16 + 0];
-                best_dy = reg->data.f[best_anchor * 16 + 1];
-                best_w  = reg->data.f[best_anchor * 16 + 2];
-                best_h  = reg->data.f[best_anchor * 16 + 3];
-            } else if (reg->type == kTfLiteUInt8) {
-                best_dx = (reg->data.uint8[best_anchor * 16 + 0] - reg->params.zero_point) * reg->params.scale;
-                best_dy = (reg->data.uint8[best_anchor * 16 + 1] - reg->params.zero_point) * reg->params.scale;
-                best_w  = (reg->data.uint8[best_anchor * 16 + 2] - reg->params.zero_point) * reg->params.scale;
-                best_h  = (reg->data.uint8[best_anchor * 16 + 3] - reg->params.zero_point) * reg->params.scale;
-            } else if (reg->type == kTfLiteInt8) {
-                best_dx = (reg->data.int8[best_anchor * 16 + 0] - reg->params.zero_point) * reg->params.scale;
-                best_dy = (reg->data.int8[best_anchor * 16 + 1] - reg->params.zero_point) * reg->params.scale;
-                best_w  = (reg->data.int8[best_anchor * 16 + 2] - reg->params.zero_point) * reg->params.scale;
-                best_h  = (reg->data.int8[best_anchor * 16 + 3] - reg->params.zero_point) * reg->params.scale;
-            }
-        }
-    } else {
-        Serial.printf("[AI LỖI] Số lượng output không hợp lệ: %d\n", num_outputs);
+
+    const int box_stride = detector_output_boxes->dims->data[detector_output_boxes->dims->size - 1];
+    if(box_stride < 4){
+        reset_ema();
         return box;
     }
-    
-    if (max_score >= 0.65f && best_anchor >= 0) {
-        int global_anchor_idx = best_anchor;
-        
-        float raw_cx = best_dx / 128.0f + g_anchors[global_anchor_idx].x;
-        float raw_cy = best_dy / 128.0f + g_anchors[global_anchor_idx].y;
-        float raw_w = best_w / 128.0f;
-        float raw_h = best_h / 128.0f;
-        
-        // --- BỘ LỌC EMA (Exponential Moving Average) ---
-        // Giúp ổn định khung mặt, chống rung lắc (jitter) để Face Recognition chính xác hơn
-        static float ema_cx = -1.0f, ema_cy = -1.0f, ema_w = -1.0f, ema_h = -1.0f;
-        const float alpha = 0.35f; // Hệ số mượt (Càng nhỏ càng mượt nhưng phản hồi chậm)
-        
-        if (ema_cx < 0.0f) { // Khởi tạo lần đầu
-            ema_cx = raw_cx; ema_cy = raw_cy; ema_w = raw_w; ema_h = raw_h;
-        } else {
-            // Nếu khung mặt di chuyển quá xa (sai số > 20%), reset EMA để bám theo ngay lập tức
-            if (abs(raw_cx - ema_cx) > 0.2f || abs(raw_cy - ema_cy) > 0.2f) {
-                ema_cx = raw_cx; ema_cy = raw_cy; ema_w = raw_w; ema_h = raw_h;
-            } else {
-                ema_cx = alpha * raw_cx + (1.0f - alpha) * ema_cx;
-                ema_cy = alpha * raw_cy + (1.0f - alpha) * ema_cy;
-                ema_w = alpha * raw_w + (1.0f - alpha) * ema_w;
-                ema_h = alpha * raw_h + (1.0f - alpha) * ema_h;
-            }
-        }
-        
-        float cx = ema_cx;
-        float cy = ema_cy;
-        float w = ema_w;
-        float h = ema_h;
-        
-        // Scale lại kích thước gốc 240x240
-        float x_center = cx * FRAME_WIDTH;
-        float y_center = cy * FRAME_HEIGHT;
-        float box_w = w * FRAME_WIDTH;
-        float box_h = h * FRAME_HEIGHT;
-        
-        box.x = max(0, (int)(x_center - box_w / 2));
-        box.y = max(0, (int)(y_center - box_h / 2));
-        box.width = min((int)box_w, FRAME_WIDTH - box.x);
-        box.height = min((int)box_h, FRAME_HEIGHT - box.y);
-        
-        Serial.printf("[BlazeFace RAW] dx:%.2f dy:%.2f w:%.2f h:%.2f -> cx:%.3f cy:%.3f box_w:%.2f box_h:%.2f\n", 
-                      best_dx, best_dy, best_w, best_h, raw_cx, raw_cy, box_w, box_h);
-        
-        // Cắt cho vuông để tương thích với GhostFaceNet
-        int size = max(box.width, box.height);
-        
-        // Căn giữa hình vuông
-        int x_adj = box.x - (size - box.width) / 2;
-        int y_adj = box.y - (size - box.height) / 2;
-        
-        box.x = max(0, x_adj);
-        box.y = max(0, y_adj);
-        box.width = min(size, FRAME_WIDTH - box.x);
-        box.height = min(size, FRAME_HEIGHT - box.y);
-        
-        box.is_valid = true;
-        Serial.printf("[BlazeFace] Tìm thấy mặt! Score: %.2f | Tọa độ: [%d, %d, %d, %d]\n", max_score, box.x, box.y, box.width, box.height);
-    } else {
-        Serial.printf("[BlazeFace] Không tìm thấy mặt. Max score: %.2f\n", max_score);
+    float dx = tensor_value(detector_output_boxes, best_idx * box_stride + 0);
+    float dy = tensor_value(detector_output_boxes, best_idx * box_stride + 1);
+    float dw = tensor_value(detector_output_boxes, best_idx * box_stride + 2);
+    float dh = tensor_value(detector_output_boxes, best_idx * box_stride + 3);
+    float cx = dx + g_anchors[best_idx].first * RAW_FRAME_SIZE;
+    float cy = dy + g_anchors[best_idx].second * RAW_FRAME_SIZE;
+    if(!isfinite(cx) || !isfinite(cy) || !isfinite(dw) || !isfinite(dh) || dw <= 0.0f || dh <= 0.0f){
+        reset_ema();
+        return box;
     }
-    
+    if(cx + dw / 2.0f <= 0.0f || cy + dh / 2.0f <= 0.0f ||
+       cx - dw / 2.0f >= RAW_FRAME_SIZE || cy - dh / 2.0f >= RAW_FRAME_SIZE){
+        reset_ema();
+        return box;
+    }
+
+    if(g_ema_cx < 0.0f){
+        g_ema_cx = cx; g_ema_cy = cy; g_ema_w = dw; g_ema_h = dh;
+    } else {
+        g_ema_cx = kEmaAlpha * cx + (1.0f - kEmaAlpha) * g_ema_cx;
+        g_ema_cy = kEmaAlpha * cy + (1.0f - kEmaAlpha) * g_ema_cy;
+        g_ema_w = kEmaAlpha * dw + (1.0f - kEmaAlpha) * g_ema_w;
+        g_ema_h = kEmaAlpha * dh + (1.0f - kEmaAlpha) * g_ema_h;
+    }
+
+    const float crop_size = max(g_ema_w, g_ema_h);
+    const float left = max(0.0f, g_ema_cx - crop_size / 2.0f);
+    const float top = max(0.0f, g_ema_cy - crop_size / 2.0f);
+    const float right = min((float)RAW_FRAME_SIZE, g_ema_cx + crop_size / 2.0f);
+    const float bottom = min((float)RAW_FRAME_SIZE, g_ema_cy + crop_size / 2.0f);
+    if(right <= left || bottom <= top){
+        reset_ema();
+        return box;
+    }
+    box.x = (int)left;
+    box.y = (int)top;
+    box.width = (int)right - box.x;
+    box.height = (int)bottom - box.y;
+    if(box.width <= 0 || box.height <= 0){
+        reset_ema();
+        return box;
+    }
+    box.center_x = g_ema_cx;
+    box.center_y = g_ema_cy;
+    box.crop_size = crop_size;
+    box.score = best_score;
+    box.is_valid = true;
     return box;
 }
 
-// Hàm nội suy song tuyến (Bilinear Interpolation) và chuyển Grayscale
-bool preprocess_face(const FaceBox& box, float* out_tensor) {
-    if (!box.is_valid || !g_frame_buffer) return false;
-    
-    // Kích thước đích của mô hình nhận diện
-    const int TARGET_SIZE = 64;
-    
-    // Tính toán tỉ lệ scale
-    float scale_x = (float)box.width / TARGET_SIZE;
-    float scale_y = (float)box.height / TARGET_SIZE;
-    
-    for (int dst_y = 0; dst_y < TARGET_SIZE; dst_y++) {
-        for (int dst_x = 0; dst_x < TARGET_SIZE; dst_x++) {
-            
-            // Tìm tọa độ tương ứng trên ảnh gốc (Bilinear Interpolation)
-            float src_x = dst_x * scale_x + box.x;
-            float src_y = dst_y * scale_y + box.y;
-            
-            // Lấy 4 điểm lân cận
-            int x1 = (int)src_x;
-            int y1 = (int)src_y;
-            int x2 = min(x1 + 1, FRAME_WIDTH - 1);
-            int y2 = min(y1 + 1, FRAME_HEIGHT - 1);
-            
-            // Trọng số nội suy
-            float wx = src_x - x1;
-            float wy = src_y - y1;
-            
-            // Lấy màu 4 điểm (RGB565 -> tách kênh)
-            auto get_gray = [](uint16_t c) {
-                uint8_t r = (c >> 11) << 3;
-                uint8_t g = ((c >> 5) & 0x3F) << 2;
-                uint8_t b = (c & 0x1F) << 3;
-                return 0.299f * r + 0.587f * g + 0.114f * b;
+// Histogram Equalization LUT — ĐỒNG BỘ bit-exact với equalize_gray_256()
+// trong host_laptop/core/vision_utils.py (cùng công thức số nguyên floor).
+// Tham khảo: Shan et al., "Illumination normalization for robust face recognition
+// against varying lighting conditions", AMFG 2003 — HE cải thiện độ chính xác
+// nhận diện khi ánh sáng thay đổi giữa lúc enroll và lúc chấm công.
+static void equalize_gray_u8(const uint8_t* src, uint8_t* dst, int n){
+    int hist[256] = {0};
+    for(int i = 0; i < n; ++i) hist[src[i]]++;
+    int cdf[256];
+    int run = 0;
+    for(int i = 0; i < 256; ++i){ run += hist[i]; cdf[i] = run; }
+    int v0 = 0;
+    while(v0 < 256 && hist[v0] == 0) ++v0;
+    if(v0 >= 256){ memcpy(dst, src, n); return; }
+    int cdf_min = cdf[v0];
+    int den = n - cdf_min;
+    uint8_t lut[256];
+    for(int v = 0; v < 256; ++v){
+        if(den <= 0){ lut[v] = (uint8_t)v; continue; }       // ảnh đơn điệu → identity
+        int num = cdf[v] - cdf_min;
+        int e = (num <= 0) ? 0 : (int)(((int64_t)num * 255) / den);
+        if(e > 255) e = 255;
+        lut[v] = (uint8_t)e;
+    }
+    for(int i = 0; i < n; ++i) dst[i] = lut[src[i]];
+}
+
+bool preprocess_face(const FaceBox& box, float* out_tensor){
+    if(!box.is_valid || !g_frame_buffer || !out_tensor ||
+       !isfinite(box.center_x) || !isfinite(box.center_y) ||
+       !isfinite(box.crop_size) || box.crop_size <= 0.0f) return false;
+    const float cx = box.center_x;
+    const float cy = box.center_y;
+    const float box_size = box.crop_size * 1.1f; // mở rộng 10%
+    float half = box_size/2;
+    float x1_box = cx - half;
+    float y1_box = cy - half;
+    float scale = box_size / FACE_TARGET_SIZE;
+    // Bilinear thủ công đồng bộ với host_laptop/core/vision_utils.py
+    // Bước 1: crop + grayscale uint8 (truncated — khớp int() của Python)
+    uint8_t gray_u8[FACE_TARGET_SIZE * FACE_TARGET_SIZE];
+    unsigned long t_perf = micros();
+    for(int ty=0; ty<FACE_TARGET_SIZE; ++ty){
+        for(int tx=0; tx<FACE_TARGET_SIZE; ++tx){
+            float sx = x1_box + (tx + 0.5f)*scale - 0.5f;
+            float sy = y1_box + (ty + 0.5f)*scale - 0.5f;
+            // Clamp tọa độ thực trước khi tính x1/y1. Nếu clamp sau đó,
+            // box vượt biên sẽ khiến x1/y1 âm giống lỗi host trước đây.
+            sx = max(0.0f, min(sx, (float)RAW_FRAME_SIZE - 1.0f));
+            sy = max(0.0f, min(sy, (float)RAW_FRAME_SIZE - 1.0f));
+            int x0 = (int)floorf(sx);
+            int y0 = (int)floorf(sy);
+            int x1 = min(x0 + 1, RAW_FRAME_SIZE - 1);
+            int y1 = min(y0 + 1, RAW_FRAME_SIZE - 1);
+            float wx = sx - x0;
+            float wy = sy - y0;
+            // Lấy 4 điểm RGB565
+            auto getGray = [&](int x,int y)->float{
+                uint16_t c = g_frame_buffer[y * RAW_FRAME_SIZE + x];
+                uint8_t r = ((c>>11)&0x1F)<<3;
+                uint8_t g = ((c>>5)&0x3F)<<2;
+                uint8_t b = (c&0x1F)<<3;
+                return 0.299f*r + 0.587f*g + 0.114f*b;
             };
-            
-            float q11 = get_gray(g_frame_buffer[y1 * FRAME_WIDTH + x1]);
-            float q21 = get_gray(g_frame_buffer[y1 * FRAME_WIDTH + x2]);
-            float q12 = get_gray(g_frame_buffer[y2 * FRAME_WIDTH + x1]);
-            float q22 = get_gray(g_frame_buffer[y2 * FRAME_WIDTH + x2]);
-            
-            // Tính giá trị xám cuối cùng
-            float gray = q11 * (1 - wx) * (1 - wy) + 
-                         q21 * wx * (1 - wy) + 
-                         q12 * (1 - wx) * wy + 
-                         q22 * wx * wy;
-                         
-            // Chuẩn hóa vào khoảng [-1.0, 1.0] cho GhostFaceNet
-            out_tensor[dst_y * TARGET_SIZE + dst_x] = (gray - 127.5f) / 128.0f;
+            float g00 = getGray(x0,y0);
+            float g01 = getGray(x1,y0);
+            float g10 = getGray(x0,y1);
+            float g11 = getGray(x1,y1);
+            float top = (1-wx)*g00 + wx*g01;
+            float bot = (1-wx)*g10 + wx*g11;
+            float gray = (1-wy)*top + wy*bot;
+            // Truncate về uint8 như int(np.clip(...)) phía Python — đầu vào của LUT HE
+            int gi = (int)max(0.0f, min(255.0f, gray));
+            gray_u8[ty * FACE_TARGET_SIZE + tx] = (uint8_t)gi;
         }
     }
-    
+    g_us_bilinear = micros() - t_perf;
+    // Bước 2: Histogram Equalization khử nhạy ánh sáng (đồng bộ Python)
+    uint8_t gray_eq[FACE_TARGET_SIZE * FACE_TARGET_SIZE];
+    t_perf = micros();
+    equalize_gray_u8(gray_u8, gray_eq, FACE_TARGET_SIZE * FACE_TARGET_SIZE);
+    g_us_he = micros() - t_perf;
+    // Bước 3: chuẩn hóa (gray - 127.5)/128.0
+    for(int i = 0; i < FACE_TARGET_SIZE * FACE_TARGET_SIZE; ++i){
+        out_tensor[i] = ((float)gray_eq[i] - 127.5f)/128.0f;
+    }
+    // [CHẨN ĐOÁN 4.1] log thống kê crop để kiểm tra cắt ảnh: mean/var trước/sau HE
+    // (giúp phát hiện crop lệch, tối/cháy, hoặc HE sai)
+    {
+        long sum = 0, sum2 = 0;
+        for(int i=0;i<FACE_TARGET_SIZE*FACE_TARGET_SIZE;i++){ sum += gray_u8[i]; sum2 += gray_u8[i]*gray_u8[i]; }
+        float mean = sum / 4096.0f;
+        float var = sum2/4096.0f - mean*mean;
+        long sum_eq=0, sum2_eq=0;
+        for(int i=0;i<FACE_TARGET_SIZE*FACE_TARGET_SIZE;i++){ sum_eq += gray_eq[i]; sum2_eq += gray_eq[i]*gray_eq[i]; }
+        float mean_eq = sum_eq/4096.0f;
+        float var_eq = sum2_eq/4096.0f - mean_eq*mean_eq;
+        Serial.printf("[CROP] mean=%.1f var=%.1f -> HE mean=%.1f var=%.1f box=(%.1f,%.1f) s=%.1f\n",
+            mean, var, mean_eq, var_eq, box.center_x, box.center_y, box.crop_size);
+    }
     return true;
 }

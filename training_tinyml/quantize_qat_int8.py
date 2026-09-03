@@ -11,6 +11,16 @@ import cv2
 import numpy as np
 import tensorflow as tf
 
+# Cho phép chạy trực tiếp từ thư mục gốc bằng:
+# python training_tinyml/quantize_qat_int8.py
+# Khi chạy theo cách này, Python chỉ tự thêm training_tinyml/ vào sys.path,
+# không thêm thư mục gốc chứa package training_tinyml.
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from host_laptop.core.vision_utils import equalize_gray_256
+
 def quantize_to_int8():
     print("==================================================================")
     print("⚡ LƯỢNG TỬ HÓA FULL INT8 CHO ESP32-S3 (TFLITE CONVERTER)")
@@ -25,7 +35,7 @@ def quantize_to_int8():
 
     # 1. Nạp mô hình Keras gốc (Float32)
     print(f"[*] Đang nạp mô hình Float32 từ: {model_path}")
-    from models.ghost_tinyface import build_tinyface_ghost
+    from training_tinyml.models.ghost_tinyface import build_tinyface_ghost
     model = build_tinyface_ghost()
     model.load_weights(model_path)
 
@@ -40,11 +50,15 @@ def quantize_to_int8():
     print(f"[*] Tìm thấy {len(img_files)} ảnh thực tế từ Camera để hiệu chuẩn (Representative Dataset)...")
 
     def representative_dataset_gen():
+        # HE đồng bộ pipeline triển khai: ảnh vào model INT8 lúc chạy thật
+        # (Laptop align_and_crop + ESP32 preprocess_face) đều đã qua equalize_gray_256,
+        # nên dữ liệu hiệu chuẩn quantization cũng phải qua HE để dải giá trị khớp.
         for path in img_files:
             img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
             if img is None:
                 continue
             img = cv2.resize(img, (64, 64), interpolation=cv2.INTER_AREA)
+            img = equalize_gray_256(img)
             norm_img = (img.astype(np.float32) - 127.5) / 128.0
             norm_img = np.expand_dims(norm_img, axis=(0, -1)) # Shape: (1, 64, 64, 1)
             yield [norm_img]

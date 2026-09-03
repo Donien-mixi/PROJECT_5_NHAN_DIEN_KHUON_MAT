@@ -1,0 +1,82 @@
+(projet_5) d:\PROJECT_5_DIEM_DANH_KHUON_MAT>python host_laptop/main.py
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1788311948.759044   23044 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1788311965.049357   23044 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+==================================================================
+🚀 KHỞI ĐỘNG HỆ THỐNG ĐIỂM DANH (LAPTOP-FIRST DEVELOPMENT)
+==================================================================
+[*] Đang nạp mô hình TFLite INT8 từ d:\PROJECT_5_DIEM_DANH_KHUON_MAT\training_tinyml\weights\tinyface_int8.tflite...
+C:\Users\DONG NHIEN\.conda\envs\projet_5\lib\site-packages\tensorflow\lite\python\interpreter.py:457: UserWarning:     Warning: tf.lite.Interpreter is deprecated and is scheduled for deletion in
+    TF 2.20. Please use the LiteRT interpreter from the ai_edge_litert package.
+    See the [migration guide](https://ai.google.dev/edge/litert/migration)
+    for details.
+
+  warnings.warn(_INTERPRETER_DELETION_WARNING)
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+[+] Đã nạp mô hình TFLite thành công.
+[*] Đã nạp CSDL JSON với 3 người dùng.
+[*] Đang khởi tạo BlazeFace Emulator 128 (đồng bộ ESP32)...
+
+[+] Đang mở luồng Camera... Nhấn 'Q' hoặc 'ESC' để thoát.
+👀 Đang so khớp: 58.1%
+✅ Đã nhận diện: nhien (65.2%) | 0.7s
+
+[+] ĐIỂM DANH THÀNH CÔNG: nhien | 2026-09-02 08:19:50 | Sim: 65.2%
+
+✅ Đã nhận diện: nhien (77.8%) | 0.7s
+
+✅ Đã nhận diện: nhien (72.0%) | 0.4s
+
+👀 Đang so khớp: 39.8%
+👀 Đang so khớp: 36.9%
+👀 Đang so khớp: 44.3%
+👀 Đang so khớp: 39.1%
+👀 Đang so khớp: 28.2%
+👀 Đang so khớp: 23.0%
+👀 Đang so khớp: 20.0%
+✅ Đã nhận diện: nhien (67.5%) | 6.1s
+
+👀 Đang so khớp: 32.7%
+👀 Đang so khớp: 44.1%
+👀 Đang so khớp: 46.2%
+👀 Đang so khớp: 47.9%
+👀 Đang so khớp: 38.7%
+👀 Đang so khớp: 44.8%
+👀 Đang so khớp: 35.2%
+👀 Đang so khớp: 39.9%
+👀 Đang so khớp: 13.4%
+👀 Đang so khớp: 17.7%
+✅ Đã nhận diện: thao (60.7%) | 1.3s
+
+[+] ĐIỂM DANH THÀNH CÔNG: thao | 2026-09-02 08:20:52 | Sim: 60.7%
+
+✅ Đã nhận diện: nhien (62.1%) | 3.4s
+
+[+] ĐIỂM DANH THÀNH CÔNG: nhien | 2026-09-02 08:21:02 | Sim: 62.1%
+👀 Đang so khớp: 31.2%
+✅ Đã nhận diện: thao (67.4%) | 0.9s
+
+✅ Đã nhận diện: thao (68.9%) | 0.6s
+
+✅ Đã nhận diện: thao (73.3%) | 0.4s
+
+👀 Đang so khớp: 34.5%
+✅ Đã nhận diện: thao (71.7%) | 0.9s
+
+[+] ĐIỂM DANH THÀNH CÔNG: thao | 2026-09-02 08:21:28 | Sim: 71.7%
+
+👀 Đang so khớp: 24.6%
+👀 Đang so khớp: 29.1%
+👀 Đang so khớp: 22.3%
+👀 Đang so khớp: 18.7%
+👀 Đang so khớp: 31.2%
+[*] Đã đóng ứng dụng an toàn.
+
+(projet_5) d:\PROJECT_5_DIEM_DANH_KHUON_MAT>python host_laptop/ip_camera_streamer.py --ip 192.168.1.70 --port 12345
+🚀 Streaming JPEG 128x128 quality=80 qua TCP 12345 (headless)
+Kết quả điểm danh xem trên Serial Monitor ESP32 (115200) + 2 LED + Buzzer. Nhấn Ctrl+C để thoát.
+Đang kết nối tới ESP32 TCP 192.168.1.70:12345...
+✅ TCP connected!
+→ đã gửi 15 frame JPEG 128x128 TCP
+
