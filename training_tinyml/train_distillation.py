@@ -1,13 +1,13 @@
 """
 ==============================================================================
 🎓 HUẤN LUYỆN UNIVERSAL FEATURE EXTRACTOR
-   KNOWLEDGE DISTILLATION TỪ SFACE TEACHER TRÊN TẬP DỮ LIỆU LFW
+   KNOWLEDGE DISTILLATION TỪ SFACE TEACHER TRÊN TẬP DỮ LIỆU CASIA-WEBFACE (HOẶC LFW)
 ==============================================================================
 Chiến lược:
   - Teacher: SFace (OpenCV, pretrained trên 10,000+ danh tính)
   - Student: Ghost-TinyFace (64x64 INT8 cho ESP32-S3)
-  - Dữ liệu: LFW (~5,000+ ảnh, ~1,600+ danh tính) — KHÔNG dùng ảnh của người dùng.
-  - Loss: Cosine Distance + MSE + Hard Negative Mining (Triplet-style)
+  - Dữ liệu: CASIA-WebFace (~10,000+ danh tính) / LFW (~1,600+ danh tính) — KHÔNG dùng ảnh của người dùng.
+  - Loss: Cosine Distance + MSE + Hard Negative Mining (Triplet-style) + ArcFace
   - Mục tiêu: Student học cách trích xuất đặc trưng khuôn mặt TỔNG QUÁT,
     không phụ thuộc vào bối cảnh hay điều kiện ánh sáng cụ thể.
 
@@ -158,10 +158,10 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
     Huấn luyện Universal Feature Extractor qua Knowledge Distillation.
     
     Pipeline:
-    1. Tải toàn bộ ảnh LFW đã tiền xử lý (64x64 Grayscale + 112x112 BGR).
+    1. Tải toàn bộ ảnh dataset đã tiền xử lý (64x64 Grayscale + 112x112 BGR).
     2. SFace Teacher trích xuất embedding 128-D cho mỗi ảnh (trên bản 112x112).
     3. Ghost-TinyFace Student học bắt chước Teacher trên bản 64x64 Grayscale.
-    4. Loss = α*Cosine + β*MSE + γ*HardNegative
+    4. Loss = α*Cosine + β*MSE + γ*HardNegative + δ*ArcFace
     5. Lưu mô hình Student đã thông minh → Sẵn sàng lượng tử hóa INT8.
     
     Tham số:
@@ -173,7 +173,7 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
     """
     print("==================================================================")
     print("🎓 HUẤN LUYỆN UNIVERSAL FEATURE EXTRACTOR")
-    print("   (KNOWLEDGE DISTILLATION TỪ SFACE TRÊN TẬP DỮ LIỆU LFW)")
+    print("   (KNOWLEDGE DISTILLATION TỪ SFACE TRÊN TẬP DỮ LIỆU CASIA-WEBFACE)")
     print("==================================================================")
     print(f"   Epochs: {epochs} | Batch Size: {batch_size} | LR: {learning_rate}")
     print(f"   Augment Repeat: {augment_repeat}x | Warmup: {warmup_epochs} epochs")
@@ -198,15 +198,23 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
     print("[+] Đã khởi tạo SFace Teacher Model thành công!")
 
     # =========================================================================
-    # BƯỚC 2: Nạp toàn bộ ảnh LFW đã tiền xử lý
+    # BƯỚC 2: Nạp toàn bộ ảnh dataset đã tiền xử lý (CASIA-WebFace hoặc LFW)
     # =========================================================================
-    lfw_dir = os.path.join(base_dir, "data", "lfw_aligned")
+    dataset_dir = os.environ.get("FACE_DATASET_DIR")
+    if dataset_dir and os.path.exists(dataset_dir):
+        lfw_dir = dataset_dir
+    elif os.path.exists(os.path.join(base_dir, "data", "casia_aligned")):
+        lfw_dir = os.path.join(base_dir, "data", "casia_aligned")
+    else:
+        lfw_dir = os.path.join(base_dir, "data", "lfw_aligned")
     teacher_112_dir = os.path.join(lfw_dir, "_teacher_112x112")
     
     if not os.path.exists(lfw_dir) or not os.path.exists(teacher_112_dir):
-        print("❌ LỖI: Chưa tải LFW dataset. Chạy download_lfw_dataset.py trước!")
-        return
+        print(f"❌ LỖI: Chưa có dữ liệu tại {lfw_dir}. Hãy chạy script tải dataset trước!")
+        sys.exit(1)
     
+    dataset_name = "CASIA-WebFace" if "casia" in lfw_dir.lower() else "LFW"
+
     # Liệt kê tất cả danh tính (bỏ qua thư mục _teacher)
     identity_dirs = [
         d for d in os.listdir(lfw_dir)
@@ -214,19 +222,23 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
     ]
     identity_dirs.sort()
     
+    if len(identity_dirs) == 0:
+        print(f"❌ LỖI: Không tìm thấy thư mục danh tính nào tại {lfw_dir}!")
+        sys.exit(1)
+        
     identity_to_idx = {name: idx for idx, name in enumerate(identity_dirs)}
     
-    print(f"[+] Tìm thấy {len(identity_dirs)} danh tính LFW để huấn luyện.")
+    print(f"[+] Tìm thấy {len(identity_dirs)} danh tính ({dataset_name}) để huấn luyện.")
 
     # =========================================================================
     # BƯỚC 3: Trích xuất Teacher Embeddings + Chuẩn bị cặp (Student Input, Teacher Target)
     # =========================================================================
     print(f"\n[*] Đang trích xuất đặc trưng Teacher và chuẩn bị dữ liệu huấn luyện...")
-    print(f"    (Mỗi ảnh gốc x {augment_repeat} biến thể augmentation)")
+    print(f"    (Cơ chế: Online Dynamic Augmentation - sinh biến thể mới trực tiếp qua từng Epoch)")
     
-    all_student_inputs = []   # Ảnh 64x64 Grayscale chuẩn hóa [-1, 1]
-    all_teacher_targets = []  # Vector embedding 128-D từ SFace Teacher
-    all_identity_labels = []  # Nhãn danh tính (cho Hard Negative Mining)
+    all_raw_student_images = []  # Ảnh 64x64 Grayscale uint8 (tốn cực ít RAM: ~150MB cho 40k ảnh)
+    all_teacher_targets = []     # Vector embedding 128-D từ SFace Teacher
+    all_identity_labels = []     # Nhãn danh tính (cho Hard Negative Mining + ArcFace)
     
     processed_count = 0
     skipped_count = 0
@@ -271,51 +283,31 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
             
             # Teacher embedding từ ảnh SẠCH (không augment): student học map
             # HE(aug(ánh sáng/tối)) -> emb(clean) => BẤT BIẾN ÁNH SÁNG.
-            # (Bài học thực tế: user chụp tối mean=42 khiến model nhầm người.)
             clean_teacher_feat = teacher.feature(teacher_bgr)[0]
             clean_teacher_feat = clean_teacher_feat / (np.linalg.norm(clean_teacher_feat) + 1e-7)
 
-            # Nhân bản với augmentation — student nhận ảnh augment + HE,
-            # teacher giữ embedding ảnh sạch => bất biến ánh sáng trong loss.
-            for aug_idx in range(augment_repeat):
-                if aug_idx == 0:
-                    # Bản gốc (không augment) — vẫn HE đồng bộ pipeline triển khai
-                    aug_gray = student_gray.copy()
-                else:
-                    # Augment ảnh Student (độ sáng/tối/gamma/độ tương phản)
-                    aug_gray = augment_image(student_gray)
-
-                # HE đồng bộ pipeline triển khai (align_and_crop live + preprocess_face ESP32)
-                he_gray = equalize_gray_256(aug_gray)
-
-                # Chuẩn hóa ảnh Student về [-1.0, 1.0]
-                norm_64 = (he_gray.astype(np.float32) - 127.5) / 128.0
-                norm_64 = np.expand_dims(norm_64, axis=-1)  # (64, 64, 1)
-
-                all_student_inputs.append(norm_64)
-                all_teacher_targets.append(clean_teacher_feat)
-                all_identity_labels.append(identity_idx)
+            all_raw_student_images.append(student_gray)
+            all_teacher_targets.append(clean_teacher_feat)
+            all_identity_labels.append(identity_idx)
+            processed_count += 1
         
-        processed_count += num_pairs
-        
-        if processed_count % 200 == 0:
-            print(f"    [{processed_count} ảnh gốc xử lý] "
-                  f"({len(all_student_inputs)} mẫu tổng cộng)...")
+        if processed_count % 1000 == 0 and processed_count > 0:
+            print(f"    [{processed_count} ảnh gốc xử lý] (Nạp vào RAM dạng uint8)...")
     
-    # Xáo trộn dữ liệu
-    print(f"\n[*] Đang xáo trộn {len(all_student_inputs)} mẫu huấn luyện...")
+    # Nén dữ liệu thành mảng NumPy uint8 siêu nhẹ
+    X_raw = np.array(all_raw_student_images, dtype=np.uint8)
+    Y_teacher = np.array(all_teacher_targets, dtype=np.float32)
+    Z_labels = np.array(all_identity_labels, dtype=np.int32)
+    del all_raw_student_images, all_teacher_targets, all_identity_labels
     
-    indices = np.random.permutation(len(all_student_inputs))
-    X_train = np.array(all_student_inputs, dtype=np.float32)[indices]
-    Y_teacher = np.array(all_teacher_targets, dtype=np.float32)[indices]
-    Z_labels = np.array(all_identity_labels, dtype=np.int32)[indices]
-    
-    # Giải phóng bộ nhớ
-    del all_student_inputs, all_teacher_targets, all_identity_labels
-    
-    print(f"\n[+] Tổng số mẫu huấn luyện: {len(X_train)} cặp (Student ↔ Teacher)")
-    print(f"    ({processed_count} ảnh gốc x {augment_repeat} augmentations)")
-    print(f"    Bỏ qua: {skipped_count} ảnh lỗi")
+    if len(X_raw) == 0:
+        print("❌ LỖI: Không nạp được ảnh nào hợp lệ để train!")
+        sys.exit(1)
+
+    ram_mb = (X_raw.nbytes + Y_teacher.nbytes + Z_labels.nbytes) / (1024 * 1024)
+    print(f"\n[+] Đã nạp thành công {len(X_raw)} ảnh gốc chất lượng cao.")
+    print(f"    - RAM chiếm dụng cho toàn bộ dataset: ~{ram_mb:.1f} MB (Cực nhẹ, an toàn 100% trên Colab).")
+    print(f"    - Bỏ qua: {skipped_count} ảnh lỗi.")
     
     # =========================================================================
     # BƯỚC 4: Xây dựng mạng Student Ghost-TinyFace
@@ -326,7 +318,7 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
     # =========================================================================
     # BƯỚC 5: Cấu hình Optimizer với Warmup + Cosine Annealing
     # =========================================================================
-    steps_per_epoch = len(X_train) // batch_size
+    steps_per_epoch = len(X_raw) // batch_size
     total_steps = epochs * steps_per_epoch
     warmup_steps = warmup_epochs * steps_per_epoch
     
@@ -382,7 +374,7 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
     #   α = 0.5 (Cosine KD - giữ hướng vector teacher)
     #   β = 0.25 (MSE - giữ biên độ)
     #   γ = 0.3 (Hard Negative Mining - đẩy xa cặp khác người)
-    #   δ = 1.0 (ArcFace - ÉP MARGIN GÓC giữa các danh tính LFW — giải pháp chuẩn
+    #   δ = 1.0 (ArcFace - ÉP MARGIN GÓC giữa các danh tính CASIA-WebFace/LFW — giải pháp chuẩn
     #            cho bài toán "2 người bị nhầm nhau", Deng et al. CVPR 2019)
     ALPHA = 0.5   # Cosine Loss weight
     BETA = 0.25   # MSE Loss weight
@@ -404,9 +396,32 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
     print(f"   BẮT ĐẦU HUẤN LUYỆN UNIVERSAL DISTILLATION ({epochs} Epochs)")
     print(f"{'='*70}")
 
+    # =========================================================================
+    # BƯỚC 6: Tạo tf.data.Dataset với TĂNG CƯỜNG ĐỘNG THỜI GIAN THỰC (Online Dynamic Augmentation)
+    # =========================================================================
+    # Cơ chế: Mỗi epoch sinh ngẫu nhiên các biến thể ánh sáng/góc xoay/nhiễu mới trực tiếp trên CPU,
+    # giúp mô hình tiếp cận hàng triệu góc nhìn khuôn mặt độc nhất mà RAM chỉ tốn ~180MB.
+    def dynamic_augment_sample(img_uint8, teacher_feat, label):
+        def _py_transform(img_np):
+            # 30% giữ nguyên ảnh gốc sạch (để giữ biên nhận diện chuẩn), 70% augment biến thiên
+            if np.random.rand() > 0.30:
+                aug = augment_image(img_np)
+            else:
+                aug = img_np
+            # Cân bằng sáng Histogram Equalization (LUT 256 chuẩn bit-exact ESP32)
+            he = equalize_gray_256(aug)
+            # Chuẩn hóa về [-1.0, 1.0]
+            norm = (he.astype(np.float32) - 127.5) / 128.0
+            return np.expand_dims(norm, axis=-1)
+
+        aug_img = tf.numpy_function(_py_transform, [img_uint8], tf.float32)
+        aug_img.set_shape([64, 64, 1])
+        return aug_img, teacher_feat, label
+
     # Tạo tf.data.Dataset
-    dataset = tf.data.Dataset.from_tensor_slices((X_train, Y_teacher, Z_labels))
-    dataset = dataset.shuffle(buffer_size=min(len(X_train), 10000))
+    dataset = tf.data.Dataset.from_tensor_slices((X_raw, Y_teacher, Z_labels))
+    dataset = dataset.shuffle(buffer_size=min(len(X_raw), 10000))
+    dataset = dataset.map(dynamic_augment_sample, num_parallel_calls=tf.data.AUTOTUNE)
     dataset = dataset.batch(batch_size, drop_remainder=True)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
@@ -477,6 +492,10 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
             epoch_arc_loss.append(a_loss)
             epoch_total_loss.append(t_loss)
 
+            if (batch_idx + 1) % 150 == 0 or (batch_idx + 1) == steps_per_epoch:
+                print(f"  [Epoch {epoch+1:2d}/{epochs}] Step {batch_idx+1:4d}/{steps_per_epoch} | "
+                      f"Loss: {t_loss:.4f} (Cos: {c_loss:.4f}, Arc: {a_loss:.4f})", flush=True)
+
         # Thống kê epoch
         avg_total = np.mean(epoch_total_loss)
         avg_cosine = np.mean(epoch_cosine_loss)
@@ -527,7 +546,7 @@ def train_universal_distillation(epochs=50, batch_size=32, learning_rate=5e-4,
     print(f"{'='*70}")
     print(f"📦 Mô hình đã lưu tại: {backbone_path}")
     print(f"📊 Best Loss đạt được: {best_loss:.4f}")
-    print(f"\n💡 Mô hình này đã được dạy trên hàng nghìn khuôn mặt đa dạng (LFW).")
+    print(f"\n💡 Mô hình này đã được dạy trên hàng chục nghìn khuôn mặt đa dạng (CASIA-WebFace).")
     print(f"   Nó giờ đây có khả năng nhận diện khuôn mặt TỔNG QUÁT,")
     print(f"   không phụ thuộc vào bối cảnh, ánh sáng hay vị trí chụp.")
     print(f"\n🔜 Tiếp theo: Chạy lượng tử hóa INT8 và tạo Database Vector cho 3 người dùng.")

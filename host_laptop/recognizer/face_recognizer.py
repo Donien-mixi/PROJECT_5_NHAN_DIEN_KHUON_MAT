@@ -10,7 +10,7 @@ class FaceRecognizer:
     nạp cơ sở dữ liệu JSON và thực hiện trích xuất đặc trưng (embedding)
     cũng như so khớp (Matching) bằng Cosine Similarity.
     """
-    def __init__(self, model_path, db_path, threshold=0.60, use_tflite=False):
+    def __init__(self, model_path, db_path, threshold=0.70, use_tflite=False):
         self.threshold = threshold
         self.use_tflite = use_tflite
         self.model = None

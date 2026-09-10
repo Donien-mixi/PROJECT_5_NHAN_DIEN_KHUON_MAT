@@ -23,7 +23,7 @@ def main():
     sqlite_db_path = os.path.join(base_dir, "data", "attendance.db")
     
     # 1. Khởi tạo các module (Phân chia logic rõ ràng)
-    recognizer = FaceRecognizer(model_path=model_path, db_path=json_db_path, threshold=0.60, use_tflite=True)
+    recognizer = FaceRecognizer(model_path=model_path, db_path=json_db_path, threshold=0.70, use_tflite=True)
     detector = UnifiedFaceDetector(target_size=(64, 64), conf_threshold=0.80)
     db = DatabaseManager(db_path=sqlite_db_path, cooldown_seconds=30)
     # Đồng bộ ESP32: TEMPORAL_VOTES=3, pause-on-Unknown (face_recognizer.py TemporalVoter)

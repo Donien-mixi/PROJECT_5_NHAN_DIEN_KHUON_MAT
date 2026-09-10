@@ -177,8 +177,8 @@ def download_and_prepare_lfw(min_faces=5, output_dir=None):
         total_saved += 1
         
         # Hiển thị tiến trình
-        if (i + 1) % 500 == 0 or (i + 1) == len(images):
-            print(f"    [{i+1}/{len(images)}] Đã cắt và lưu bằng BlazeFace...")
+        if (i + 1) % 200 == 0 or (i + 1) == len(images):
+            print(f"    [{i+1}/{len(images)}] Đã cắt và lưu bằng BlazeFace...", flush=True)
     
     # Thống kê
     num_identities = len([d for d in os.listdir(output_dir) 

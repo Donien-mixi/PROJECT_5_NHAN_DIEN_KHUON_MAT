@@ -6,8 +6,8 @@
 #include "wifi_udp_server.h"            
 #include "image_decoder.h"    
 #include "ai_face_detector.h"    
-#include "ai_face_recognizer.h"       
-#include "ai_config.h"      
+#include "ai_face_recognizer.h"          
+#include "ai_config.h"        
 
 // Task handles  
 TaskHandle_t NetDisplayTask;

@@ -1,95 +1,82 @@
+[WiFi] Connecting to Phong 2
+Tasks created
+[AITask] setup detectors
+Khoi tao BlazeFace 128...
+[HB] WiFi connecting 2s
+Frame buffer 32KB PSRAM OK
+[Detector] Arena used 602216 / 1048576
+Khoi tao TFLite Micro Face Recognizer...
+[Recognizer] Arena used 186588 / 524288
+>>> TFLite Micro Model da nap thanh cong vao PSRAM!
+>>> ESP-NN SIMD (recognizer): BAT — realtime mode
+[ESPNN-TEST] running self-test (esp-nn vs reference)...
+[ESPNN-TEST] conv im2col (in=8x8x4 f=3x3 out=8) maxdiff=0 scratch=560
+[ESPNN-TEST] conv padded (in=8x8x8 f=3x3 out=16) maxdiff=0 scratch=5568
+[ESPNN-TEST] conv 1x1_16 (in=16x16x16 f=1x1 out=16) maxdiff=0 scratch=576
+[ESPNN-TEST] conv 1x1_1ch (in=16x16x1 f=1x1 out=16) maxdiff=0 scratch=2368
+[ESPNN-TEST] dw opt (in=8x8x6 f=3x3) maxdiff=0 scratch=1792
+[ESPNN-TEST] SUMMARY conv_maxdiff=0 dwconv_maxdiff=0 PASS
+[AITask] ready
+...
+[WiFi] Connected
+192.168.2.31
+TCP 12345 listening (packet 32768)
+[HB] IP 192.168.2.31 TCP 12345 Uptime 4s
+[HB] IP 192.168.2.31 TCP 12345 Uptime 6s
 [Net] Client connected
+[HB] IP 192.168.2.31 TCP 12345 Uptime 8s
+[BOX] score=0.91 cx=63.2 cy=95.2 size=61.9 -> 62x62 @(32,64)
+[CROP] mean=84.5 var=1718.0 -> HE mean=127.9 var=5404.1 box=(63.2,95.2) s=61.9
+[HB] IP 192.168.2.31 TCP 12345 Uptime 10s
+[PERF] det:1949.33ms bil:5301us he:393us rec:1306.98ms dec:17238us cy:DETECT
+🔍 [AI] Frame hiện tại: Unknown (best nhien 0.79 < ngưỡng 0.80)
 [HB] IP 192.168.2.31 TCP 12345 Uptime 12s
+[BOX] score=0.91 cx=65.0 cy=96.1 size=61.3 -> 61x61 @(34,65)
+[CROP] mean=92.3 var=1804.9 -> HE mean=127.9 var=5410.1 box=(65.0,96.1) s=61.3
+[PERF] det:1943.85ms bil:5300us he:868us rec:1310.87ms dec:17214us cy:DETECT
+🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.82, ngưỡng 0.80)
+[CROP] mean=92.1 var=1830.3 -> HE mean=127.9 var=5411.2 box=(65.0,96.1) s=61.3
 [HB] IP 192.168.2.31 TCP 12345 Uptime 14s
-[BOX] score=0.91 cx=63.2 cy=91.6 size=63.7 -> 64x64 @(31,59)
-[CROP] mean=95.6 var=2443.6 -> HE mean=127.8 var=5384.5 box=(63.2,91.6) s=63.7
-[PERF] det:1945.99ms bil:5316us he:398us rec:1299.81ms dec:18007us cy:DETECT
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.68, ngưỡng 0.60)
-[CROP] mean=97.5 var=2495.1 -> HE mean=127.7 var=5398.1 box=(63.2,91.6) s=63.7
+[PERF] det:0.00ms bil:5943us he:399us rec:1298.66ms dec:17118us cy:REUSE
+🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.80, ngưỡng 0.80)
+[CROP] mean=92.5 var=1783.8 -> HE mean=128.0 var=5407.2 box=(65.0,96.1) s=61.3
 [HB] IP 192.168.2.31 TCP 12345 Uptime 16s
-[PERF] det:0.00ms bil:6297us he:398us rec:1307.35ms dec:18005us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.68, ngưỡng 0.60)
-[CROP] mean=97.0 var=2509.9 -> HE mean=127.8 var=5396.0 box=(63.2,91.6) s=63.7
+[PERF] det:0.00ms bil:6669us he:428us rec:1300.93ms dec:17021us cy:REUSE
+🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.84, ngưỡng 0.80)
+SUCCESS nhien
+Saved nhien
+[CROP] mean=90.6 var=1802.0 -> HE mean=128.0 var=5414.0 box=(65.0,96.1) s=61.3
+[PERF] det:0.00ms bil:5172us he:394us rec:1306.45ms dec:17191us cy:REUSE
+🔍 [AI] Frame hiện tại: Unknown (best nhien 0.79 < ngưỡng 0.80)
+[CROP] mean=91.4 var=1822.3 -> HE mean=128.0 var=5407.0 box=(65.0,96.1) s=61.3
 [HB] IP 192.168.2.31 TCP 12345 Uptime 18s
-[PERF] det:0.00ms bil:5299us he:390us rec:1313.50ms dec:18145us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.67, ngưỡng 0.60)
-SUCCESS nhien
-Saved nhien
-[CROP] mean=95.3 var=2498.2 -> HE mean=127.8 var=5383.8 box=(63.2,91.6) s=63.7
-[PERF] det:0.00ms bil:5173us he:391us rec:1302.78ms dec:18095us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.67, ngưỡng 0.60)
-[CROP] mean=94.5 var=2493.9 -> HE mean=127.9 var=5381.7 box=(63.2,91.6) s=63.7
+[PERF] det:0.00ms bil:5207us he:392us rec:1305.80ms dec:17036us cy:REUSE
+🔍 [AI] Frame hiện tại: Unknown (best nhien 0.80 < ngưỡng 0.80)
 [HB] IP 192.168.2.31 TCP 12345 Uptime 20s
-[PERF] det:0.00ms bil:5212us he:398us rec:1305.54ms dec:18060us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.68, ngưỡng 0.60)
-[CROP] mean=94.8 var=2487.2 -> HE mean=127.8 var=5385.8 box=(63.2,91.6) s=63.7
+[BOX] score=0.91 cx=66.2 cy=96.7 size=61.5 -> 61x62 @(35,65)
+[CROP] mean=90.1 var=1741.5 -> HE mean=127.9 var=5415.0 box=(66.2,96.7) s=61.5
 [HB] IP 192.168.2.31 TCP 12345 Uptime 22s
-[PERF] det:0.00ms bil:5294us he:392us rec:1309.61ms dec:18248us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.66, ngưỡng 0.60)
-[CROP] mean=94.1 var=2479.0 -> HE mean=127.8 var=5392.8 box=(63.2,91.6) s=63.7
-[PERF] det:0.00ms bil:5172us he:392us rec:1306.29ms dec:18135us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.68, ngưỡng 0.60)
-[CROP] mean=94.2 var=2497.4 -> HE mean=127.8 var=5382.8 box=(63.2,91.6) s=63.7
+[PERF] det:1953.66ms bil:5301us he:393us rec:1298.55ms dec:17215us cy:DETECT
+🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.82, ngưỡng 0.80)
+[CROP] mean=89.5 var=1731.4 -> HE mean=127.8 var=5423.1 box=(66.2,96.7) s=61.5
+[PERF] det:0.00ms bil:6802us he:393us rec:1288.96ms dec:17189us cy:REUSE
+🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.81, ngưỡng 0.80)
+[CROP] mean=89.5 var=1728.6 -> HE mean=127.9 var=5415.8 box=(66.2,96.7) s=61.5
 [HB] IP 192.168.2.31 TCP 12345 Uptime 24s
-[PERF] det:0.00ms bil:5294us he:392us rec:1310.36ms dec:18074us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.71, ngưỡng 0.60)
-[CROP] mean=111.2 var=2705.3 -> HE mean=127.8 var=5428.6 box=(63.2,91.6) s=63.7
+[PERF] det:0.00ms bil:8674us he:401us rec:1289.82ms dec:17122us cy:REUSE
+🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.81, ngưỡng 0.80)
+[CROP] mean=89.3 var=1719.5 -> HE mean=128.0 var=5404.7 box=(66.2,96.7) s=61.5
 [HB] IP 192.168.2.31 TCP 12345 Uptime 26s
-[PERF] det:0.00ms bil:9474us he:392us rec:1301.95ms dec:17906us cy:REUSE
-🔍 [AI] Frame hiện tại: Unknown (best toan 0.41 < ngưỡng 0.60)
-[CROP] mean=107.0 var=2766.5 -> HE mean=127.8 var=5406.7 box=(63.2,91.6) s=63.7
-[PERF] det:0.00ms bil:5213us he:392us rec:1299.32ms dec:17941us cy:REUSE
-🔍 [AI] Frame hiện tại: Unknown (best nhien 0.27 < ngưỡng 0.60)
-[HB] IP 192.168.2.31 TCP 12345 Uptime 28s
-[BOX] KHONG tim thay mat (conf < 0.80)
-[HB] IP 192.168.2.31 TCP 12345 Uptime 30s
-[BOX] KHONG tim thay mat (conf < 0.80)
-[HB] IP 192.168.2.31 TCP 12345 Uptime 32s
-[BOX] score=0.84 cx=56.9 cy=90.7 size=53.8 -> 54x54 @(29,63)
-[CROP] mean=115.9 var=2296.8 -> HE mean=127.9 var=5449.8 box=(56.9,90.7) s=53.8
-[HB] IP 192.168.2.31 TCP 12345 Uptime 34s
-[PERF] det:1941.66ms bil:5284us he:389us rec:1312.92ms dec:18178us cy:DETECT
-🔍 [AI] Frame hiện tại: Unknown (best toan 0.29 < ngưỡng 0.60)
-[HB] IP 192.168.2.31 TCP 12345 Uptime 36s
-[BOX] KHONG tim thay mat (conf < 0.80)
-[HB] IP 192.168.2.31 TCP 12345 Uptime 38s
-[BOX] score=0.91 cx=61.4 cy=98.8 size=67.3 -> 68x63 @(27,65)
-[CROP] mean=94.3 var=2461.8 -> HE mean=127.9 var=5386.6 box=(61.4,98.8) s=67.3
-[HB] IP 192.168.2.31 TCP 12345 Uptime 40s
-[PERF] det:1947.79ms bil:5300us he:392us rec:1303.32ms dec:18089us cy:DETECT
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.67, ngưỡng 0.60)
-[CROP] mean=93.6 var=2611.4 -> HE mean=127.8 var=5379.7 box=(61.4,98.8) s=67.3
-[PERF] det:0.00ms bil:5284us he:393us rec:1321.96ms dec:18141us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.65, ngưỡng 0.60)
-[CROP] mean=93.7 var=2609.3 -> HE mean=127.9 var=5376.2 box=(61.4,98.8) s=67.3
-[HB] IP 192.168.2.31 TCP 12345 Uptime 42s
-[PERF] det:0.00ms bil:5708us he:397us rec:1321.23ms dec:18123us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.64, ngưỡng 0.60)
+[PERF] det:0.00ms bil:12992us he:394us rec:1298.00ms dec:17202us cy:REUSE
+🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.80, ngưỡng 0.80)
 SUCCESS nhien
 Saved nhien
-[CROP] mean=92.7 var=2548.8 -> HE mean=127.9 var=5375.1 box=(61.4,98.8) s=67.3
-[HB] IP 192.168.2.31 TCP 12345 Uptime 44s
-[PERF] det:0.00ms bil:5936us he:399us rec:1297.76ms dec:17765us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.65, ngưỡng 0.60)
-[CROP] mean=89.6 var=2339.1 -> HE mean=128.0 var=5377.0 box=(61.4,98.8) s=67.3
-[PERF] det:0.00ms bil:6061us he:391us rec:1300.85ms dec:18160us cy:REUSE
-🔍 [AI] Frame hiện tại: Unknown (best nhien 0.35 < ngưỡng 0.60)
-[CROP] mean=99.8 var=2404.4 -> HE mean=127.8 var=5387.5 box=(61.4,98.8) s=67.3
-[HB] IP 192.168.2.31 TCP 12345 Uptime 46s
-[PERF] det:0.00ms bil:5923us he:395us rec:1296.66ms dec:18089us cy:REUSE
-🔍 [AI] Frame hiện tại: Unknown (best nhien 0.48 < ngưỡng 0.60)
-[HB] IP 192.168.2.31 TCP 12345 Uptime 48s
-[BOX] score=0.91 cx=62.0 cy=96.3 size=66.4 -> 67x65 @(28,63)
-[CROP] mean=94.0 var=2325.5 -> HE mean=127.8 var=5390.6 box=(62.0,96.3) s=66.4
-[Net] Header under-read, disconnect
-[Net] Client disconnected
-[HB] IP 192.168.2.31 TCP 12345 Uptime 50s
-[PERF] det:1850.52ms bil:5305us he:395us rec:1168.28ms dec:18089us cy:DETECT
-🔍 [AI] Frame hiện tại: Unknown (best nhien 0.59 < ngưỡng 0.60)
-REJECT UNKNOWN
-[HB] IP 192.168.2.31 TCP 12345 Uptime 52s
+[CROP] mean=86.4 var=1938.1 -> HE mean=128.0 var=5392.2 box=(66.2,96.7) s=61.5
+[HB] IP 192.168.2.31 TCP 12345 Uptime 28s
+[PERF] det:0.00ms bil:5173us he:395us rec:1311.86ms dec:17114us cy:REUSE
+🔍 [AI] Frame hiện tại: Unknown (best nhien 0.71 < ngưỡng 0.80)
+[CROP] mean=101.1 var=3155.1 -> HE mean=127.8 var=5397.6 box=(66.2,96.7) s=61.5
 ESP-ROM:esp32s3-20210327
 Build:Mar 27 2021
 rst:0x1 (POWERON),boot:0x0 (DOWNLOAD(USB/UART0))
 waiting for download
-

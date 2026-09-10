@@ -35,3 +35,6 @@ sdkconfig.old
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Large dataset files (>100MB)
+faces_webface_112x112.zip

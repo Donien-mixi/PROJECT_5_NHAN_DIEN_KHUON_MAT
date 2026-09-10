@@ -246,7 +246,7 @@ def evaluate():
             best = (float(t), tar, far, delta)
     t_best, tar_best, far_best, _ = best
 
-    OP_THRESHOLD = 0.60  # ngưỡng đang dùng trong hệ thống (main.py + FACE_THRESHOLD trên ESP32)
+    OP_THRESHOLD = 0.70  # ngưỡng đang dùng trong hệ thống (main.py + FACE_THRESHOLD trên ESP32)
     tar_op = float(np.mean(probe_scores >= OP_THRESHOLD)) if len(probe_scores) else float("nan")
     far_op = float(np.mean(impostor_scores >= OP_THRESHOLD)) if len(impostor_scores) else float("nan")
     tar88 = float(np.mean(probe_scores >= 0.88)) if len(probe_scores) else float("nan")
@@ -254,7 +254,7 @@ def evaluate():
 
     print(f"   Số mẫu probe: {len(probe_scores)} | Số mẫu impostor: {len(impostor_scores)}")
     print(f"   Đề xuất tối ưu (max TAR-FAR): threshold={t_best:.2f} | TAR={tar_best:.4f} | FAR={far_best:.4f}")
-    print(f"   Tại 0.60 (đang dùng):            TAR={tar_op:.4f} | FAR={far_op:.4f}")
+    print(f"   Tại 0.70 (đang dùng):            TAR={tar_op:.4f} | FAR={far_op:.4f}")
     print(f"   Tại 0.88 (cũ):                   TAR={tar88:.4f} | FAR={far88:.4f}")
     print(f"   Ghi chú: FAR ở mục này đo bằng CENTROID (đơn giản hơn hệ thống thật);")
     print(f"   xem mục 5 — Identification Accuracy dùng đúng logic MAX-SIM của hệ thống.")
@@ -299,7 +299,7 @@ def evaluate():
     #    - OPIS-lite: FRR từng người tại ngưỡng global — đo "threshold inconsistency"
     print("\n--- 7. PER-IDENTITY THRESHOLD + TAR@FAR (mục 4.2 README) ---")
     PER_ID_MARGIN = 0.02
-    PER_ID_CAP = 0.80
+    PER_ID_CAP = 0.75
     if len(impostor_scores):
         far0_thresh = float(np.max(impostor_scores)) + 0.01
         print(f"   Ngưỡng an toàn FAR=0 trên {len(impostor_scores)} mẫu impostor: {far0_thresh:.3f}")
@@ -322,7 +322,7 @@ def evaluate():
         db_str = f" | DB: {db_thr}" if db_thr is not None else ""
         print(f"   👤 {u}: cross_max={cross_max:.3f} → ngưỡng đề xuất {thr:.3f} | FRR@{OP_THRESHOLD}={frr_u*100:.1f}%{db_str}")
     print("   (Ngưỡng đã được ghi vào face_database.json/.h bởi generate_embeddings.py —")
-    print("    matching hiệu lực = max(0.60, ngưỡng riêng) trên CẢ Laptop và ESP32.)")
+    print(f"    matching hiệu lực = max({OP_THRESHOLD:.2f}, ngưỡng riêng) trên CẢ Laptop và ESP32.)")
 
     print("\n--- 6. KẾT LUẬN THRESHOLD ---")
     print("   Chọn threshold trên tập dev (tối ưu TAR-FAR + Identification), sau đó KHÓA và")

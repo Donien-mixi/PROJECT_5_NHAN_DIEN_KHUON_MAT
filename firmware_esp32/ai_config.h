@@ -7,7 +7,7 @@
 #define RAW_FRAME_SIZE        128
 #define FACE_TARGET_SIZE      64
 #define FACE_EMBEDDING_DIM    128
-#define FACE_THRESHOLD        0.60f
+#define FACE_THRESHOLD        0.70f
 #define DETECTOR_CONF_THRESH  0.80f
 #define TEMPORAL_VOTES        3
 #define MAX_TEMPLATES         16

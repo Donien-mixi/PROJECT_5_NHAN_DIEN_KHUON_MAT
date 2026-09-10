@@ -29,9 +29,9 @@ FACE_EMBEDDING_DIM = 128
 # 4.2 Per-identity threshold (Verheyen ARES 2023 — identity-level thresholds):
 # người dễ nhầm (cross-sim cao với người khác) có ngưỡng riêng cao hơn ngưỡng global,
 # giúp FAR ổn định khi DB dày lên mà không cần train lại. Floor = global, cap = 0.80.
-GLOBAL_THRESHOLD = 0.60
+GLOBAL_THRESHOLD = 0.70
 PER_ID_MARGIN = 0.02   # cross_max + margin
-PER_ID_CAP = 0.80      # tránh ngưỡng cao tới mức người thật cũng không bao giờ đạt
+PER_ID_CAP = 0.75      # Ngưỡng trần tối ưu (tránh quá gắt, cho phép góc mặt dao động tự nhiên 0.75-0.85)
 
 
 def compute_per_identity_thresholds(database):

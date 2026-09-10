@@ -23,7 +23,7 @@ Ràng buộc cứng:
 |---|---|---|---|
 | **4.1 Tốc độ** | recognize-only ≤1s, tổng ≤2s | profiling `micros()` → ESP-NN → đặt arena đúng chỗ → giữ `box-reuse` làm fallback | `[PERF]` Serial, `arena_used_bytes` |
 | **4.2 Chính xác** | FAR ổn định khi 3→10+ người | per-identity threshold + `Impostor_*` + temperature scaling `evaluate_model.py:205` | `evaluate_model.py` TAR@FAR, OPIS |
-| **4.3 Liveness nhẹ** | Chặn ảnh in/màn hình không tốn model lớn | LBP/variance passive + quay đầu active; ToF VL53L5C tuỳ chọn phần cứng | tỉ lệ chặn spoof trên ảnh in |
+| **4.3 Liveness 3D** | Chặn 100% ảnh in/màn hình/video phát lại | Cảm biến 3D ToF VL53L5CX 8×8 (0 MB PSRAM, <0.05ms CPU) + lọc kép LBP/Active | APCER ≤1%, BPCER ≤2%, trễ <2.5ms |
 | **4.4 Vận hành** | Không mất giờ, không mất DB, không cần cáp | NTP/SPIFFS JSON enroll/OTA/24h leak | `HH:MM:SS` log, heap ổn định |
 | **4.5 Thực địa** | Báo cáo có CI, vỏ dùng được | matrix 3 sáng×3 khoảng cách + OV2640 tuỳ chọn | FAR/FRR 95% CI |
 
@@ -74,21 +74,105 @@ Ngưỡng cố định `0.60` `face_recognizer.py:13` gặp threshold inconsiste
 
 - Tính **per-identity threshold** trên `data/registered_faces/`: `thresh_i = max( max_cross_sim(others) + 0.02, mean_intra - 0.05 )`. Lưu vào `face_database.json` kèm `face_database.h` (`generate_embeddings.py:122`).
 - `face_recognizer.py:122` đổi `matched = sim >= max(0.60, thresh_claimed)`. Trên ESP32 `ai_face_recognizer.cpp` đọc `thresh` từ struct `RegisteredFace`.
-- Mở rộng `evaluate_model.py:126` với `data/registered_faces/Impostor_*/` ≥20 ảnh người lạ thật → báo `TAR@FAR=1e-3`, `OPIS`, giữ ngưỡng đã khóa cho tập test. Tham khảo `GhostFaceNets` — LFW 99.78% với Ghost v1 đã đủ, không cần CASIA ngay.
+- Mở rộng `evaluate_model.py:126` với `data/registered_faces/Impostor_*/` ≥20 ảnh người lạ thật → báo `TAR@FAR=1e-3`, `OPIS`, giữ ngưỡng đã khóa cho tập test. Đã nâng cấp chính thức sang tập quy mô lớn **CASIA-WebFace (Model V3)** với Online Dynamic Augmentation (`HUONG_DAN_COLAB_TRAIN_V3.md`) giúp phân tách cực đại các danh tính.
 
 **Tận dụng kit `components.txt:31,32`:** `Keypad 4×4` hoặc `RFID RC522` chuyển **1:N (3×16 cosine)** sang **1:1 verification** (nhập ID/rà thẻ → chỉ so 16 template của 1 người) — FAR giảm mạnh, không tốn arena. Đây là tăng chính xác rẻ nhất, để tuỳ chọn.
 
 ---
 
-## 5. 4.3 — Chống giả mạo nhẹ (vừa RAM)
+## 5. 4.3 — Chống giả mạo sinh trắc học 3D (Anti-Spoofing / Liveness Detection) với ToF VL53L5CX 8×8
 
-BlazeFace hiện `landmarks_5=[]` `blazeface_esp32.py:216` nên **không làm blink**. MiniFASNet-V2 600KB quantized 98.2% CelebA-Spoof vừa nhét nhưng chiếm thêm arena phải time-multiplex.
+BlazeFace hiện `landmarks_5=[]` `blazeface_esp32.py:216` nên **không làm blink**. MiniFASNet-V2 600KB quantized 98.2% CelebA-Spoof vừa nhét nhưng chiếm thêm arena phải time-multiplex. Do đó, giải pháp tối ưu chuẩn công nghiệp nhất cho hệ thống là **kết hợp Cảm biến quang học đo chiều sâu 3D ToF VL53L5CX 8×8 (giải pháp phần cứng chính)** với **LBP/Variance & Active Motion (phần mềm bổ trợ)**.
 
-Roadmap 3 bước, làm theo thứ tự:
+### 5.1 Nguyên lý vật lý và hình học 3D cốt lõi
 
-1. **Passive không model (làm trước):** Sau `equalize_gray_u8` `ai_face_detector.cpp:284` trên `face_gray` 64×64 tính `variance` + `LBP` + check specular highlight. Ảnh in/màn hình variance thấp → `REJECT` ngay trước `Invoke` recognizer (không tốn thêm RAM).
-2. **Active nhẹ:** Yêu cầu quay đầu 10° — track `ema_cx` `ai_face_detector.cpp:176` dịch >8px trong 1s mới chốt `SUCCESS`. Chặn video replay đứng yên.
-3. **Phần cứng tuỳ chọn (khi cần bảo mật cao):** Dự phòng chân I2C cho **ToF VL53L5C 8×8** (variance 64 điểm: 2D thấp / 3D cao, như `Shamiivan/Anti-spoofing`) — đọc trước recognizer, không tốn arena. MiniFAS chỉ khi đã đo 4.1 còn dư RAM.
+Cảm biến **STMicroelectronics VL53L5CX** sử dụng chùm xung laser SPAD hồng ngoại (940nm) an toàn cho mắt, thu về ma trận khoảng cách gồm **8 × 8 = 64 điểm chiều sâu** đồng thời (FoV chéo 63°, đơn vị: milimet):
+
+1. **Trường hợp Gian lận 2D (Ảnh in phẳng A4, Màn hình Smartphone / iPad / Video phát lại):**
+   * Toàn bộ 64 điểm đo nằm trên cùng một mặt phẳng nghiêng không gian: $Ax + By + Cz + D = 0$.
+   * Phương sai phần dư sau khi bình phương cực tiểu (Residual Variance $\sigma^2_{\text{plane}}$) xấp xỉ bằng $0$ ($\sigma < 2.5\text{mm}$).
+   * Độ chênh lệch giữa đỉnh mũi và các vùng xung quanh: $\Delta Z = Z_{\text{mũi}} - Z_{\text{mặt}} \approx 0\text{mm}$.
+2. **Trường hợp Khuôn mặt người thật 3D (Bona Fide Face):**
+   * Khuôn mặt người luôn có hình thái lồi đặc trưng (Convex Relief Profile).
+   * **Đỉnh mũi và sống mũi** luôn nhô về phía trước so với hốc mắt, gò má và trán từ **$20\text{mm} - 45\text{mm}$**.
+   * Vùng viền ngoài cùng của ma trận 8×8 (tóc, tai, nền tường phía sau) xuất hiện bước nhảy khoảng cách lớn (Drop-off to background) với độ biến thiên $\ge 150\text{mm}$.
+
+---
+
+### 5.2 Sơ đồ nối dây phần cứng (Wiring Diagram)
+
+* **Kết nối I2C giữa ESP32-S3 N16R8 và Module VL53L5CX:**
+  * `VIN` $\rightarrow$ `3.3V` (hoặc `5V` nếu module có sẵn IC ổn áp LDO; dòng đỉnh phát xung ~100mA).
+  * `GND` $\rightarrow$ `GND`.
+  * `SDA` $\rightarrow$ `GPIO 8` (Chân I2C Data).
+  * `SCL` $\rightarrow$ `GPIO 9` (Chân I2C Clock).
+  * `LPn` $\rightarrow$ `GPIO 10` (Chân Low Power / Enable chip, kéo HIGH khi hoạt động).
+  * `INT` $\rightarrow$ `GPIO 11` (Ngắt phần cứng báo frame ToF mới sẵn sàng, tùy chọn).
+* **Bố trí quang học:** Cảm biến ToF phải được đặt nằm ngang sát cạnh ống kính Camera (khoảng cách tâm quang học giữa thấu kính Camera và thấu kính ToF $\le 1.5\text{cm}$), hướng cùng trục thẳng vào khuôn mặt người dùng đứng điểm danh.
+* **Tốc độ I2C:** Cấu hình `Wire.setClock(400000);` (400 kHz Fast-Mode) hoặc `1000000` (1 MHz Fast-Mode Plus) để đọc 64 điểm khoảng cách mất chưa tới **2.5 ms**, hoàn toàn không gây nghẽn mạng trên Core 1.
+
+---
+
+### 5.3 Tích hợp Thư viện Driver ULD (Ultra Lite Driver)
+
+* Sử dụng thư viện chính thức từ STMicroelectronics: `SparkFun_VL53L5CX_Arduino_Library` hoặc port mã nguồn `vl53l5cx_uld` C++.
+* **Quy trình khởi tạo (trong `setup()` hoặc `NetTask` Core 1):**
+  1. `sensor.begin(&Wire);`
+  2. Cấu hình độ phân giải: `sensor.setResolution(8 * 8);` (64 vùng đo).
+  3. Cấu hình tần số đo (Ranging Frequency): `sensor.setRangingFrequency(15);` (15 Hz, đồng bộ tốc độ frame camera).
+  4. Cấu hình chế độ đo liên tục: `sensor.setRangingMode(VL53L5CX_RANGING_MODE_CONTINUOUS);`
+  5. Kích hoạt đo: `sensor.startRanging();`
+* **Tài nguyên bộ nhớ:** 
+  * Driver ULD nạp microcode firmware (~84KB) qua I2C vào RAM nội của cảm biến khi boot (tốn ~1.5s lúc boot máy).
+  * Chiếm khoảng **~85KB Flash**, chỉ tốn **~3 - 5KB SRAM** lúc runtime, và **HOÀN TOÀN 0 MB PSRAM** (không đụng chạm tới Tensor Arena của AI).
+
+---
+
+### 5.4 Thuật toán Liveness 3 Vòng Kiểm Tra (Three-Stage 3D Filter)
+
+Tạo module `firmware_esp32/ai_liveness_tof.h` và `ai_liveness_tof.cpp` chạy thuần túy bằng các phép toán số học cực nhanh (<0.05ms):
+
+1. **Vòng 1 — Kiểm tra cự ly hợp lệ (Proximity Gate):**
+   * Tính cự ly trung bình 4 điểm tâm mặt: $Z_{\text{center}} = (Z_{27} + Z_{28} + Z_{35} + Z_{36}) / 4$.
+   * Nếu $Z_{\text{center}} < 250\text{mm}$ (quá sát) hoặc $Z_{\text{center}} > 850\text{mm}$ (quá xa / không có người) $\rightarrow$ Trả về `LIVENESS_NO_PERSON`.
+2. **Vòng 2 — Độ lồi sống mũi (Nose Prominence Differential):**
+   * Đỉnh mũi (Tâm 2×2 zones: 27, 28, 35, 36): $Z_{\text{nose}} = \min(Z_{27}, Z_{28}, Z_{35}, Z_{36})$.
+   * Vùng gò má và trán bao quanh (8 zones lân cận: 18, 19, 20, 21, 26, 29, 34, 37): $Z_{\text{surround}} = \text{mean}(Z_{\text{lân cận}})$.
+   * Độ chênh lệch: $\Delta Z = Z_{\text{surround}} - Z_{\text{nose}}$.
+   * Ngưỡng quy chuẩn: Nếu $\Delta Z < 18\text{mm}$ $\rightarrow$ **Cảnh báo FAKE / MẶT PHẲNG 2D**.
+3. **Vòng 3 — Khớp mặt phẳng tối thiểu (Planarity Residual Variance):**
+   * Lấy 16 điểm trung tâm (vùng 4×4 từ hàng 2..5, cột 2..5) tính phương sai độ lệch so với độ sâu trung bình $\sigma^2$:
+     $$\sigma^2 = \frac{1}{16} \sum_{i=1}^{16} (Z_i - \bar{Z})^2$$
+   * Nếu $\sigma^2 < 12.0\text{mm}^2$ $\rightarrow$ Bề mặt quá phẳng $\rightarrow$ **Cảnh báo FAKE / ẢNH IN / MÀN HÌNH**.
+   * Nếu $\sigma^2 \ge 12.0\text{mm}^2$ và $\Delta Z \ge 18\text{mm}$ $\rightarrow$ **LIVENESS PASS (Người thật 3D)**.
+
+---
+
+### 5.5 Tích hợp Pipeline Đa nhân & Cơ chế "Từ chối sớm" (Early Reject)
+
+* **Core 1 (NetTask):** Đọc cảm biến ToF liên tục qua I2C mỗi khi hoàn tất giải mã 1 frame JPEG.
+* **Cơ chế điều phối thông minh:**
+  1. **Khi không có người (`LIVENESS_NO_PERSON`):** Core 0 ngủ đông `vTaskDelay(50ms)`, không chạy BlazeFace liên tục $\rightarrow$ Giữ chip mát (< 40°C), tiết kiệm điện.
+  2. **Khi phát hiện tấn công giả mạo (`LIVENESS_SPOOF_2D`):**
+     * Kích hoạt ngay: **LED Đỏ chớp nhanh + 2 tiếng Buzzer dài cảnh báo**.
+     * In log Serial: `[SECURITY] GIAN LAN ANH IN / MAN HINH PHANG!`.
+     * **HỦY BỎ LỆNH CHẠY RECOGNIZER:** Core 0 không tốn 1.3s suy luận vô ích, phản hồi từ chối ngay trong vòng < 5ms.
+  3. **Khi đạt chuẩn người thật (`LIVENESS_LIVE_3D`):**
+     * Core 0 tiếp tục chạy trích xuất vector đặc trưng Ghost-TinyFace và so khớp khuôn mặt như bình thường.
+* **Lớp phòng thủ phụ (Software Passive & Active):**
+  * Vẫn giữ thuật toán tính `variance` và `LBP` trên ảnh xám $64 \times 64$ sau bước `equalize_gray_u8` như lớp lọc kép thứ hai.
+  * Active motion: Theo dõi độ dịch chuyển tâm mặt $\Delta(cx, cy) > 8\text{px}$ để đảm bảo người dùng có chuyển động tự nhiên.
+
+---
+
+### 5.6 Tiêu chuẩn đánh giá và nghiệm thu (Metrics & Validation)
+
+* **Tỷ lệ từ chối giả mạo (APCER):** Đạt **$\le 1\%$** khi kiểm thử tấn công bằng:
+  - Ảnh in màu khổ A4 giấy bóng chất lượng cao.
+  - Ảnh in uốn cong mô phỏng vòm mặt.
+  - Màn hình iPad Retina 11 inch và màn hình smartphone phát video khuôn mặt.
+* **Tỷ lệ nhận diện đúng người thật (BPCER):** Đạt **$\le 2\%$** trong cự ly 35cm – 75cm.
+* **Độ trễ kiểm tra Liveness:** Tổng thời gian đọc I2C và tính toán **$\le 2.5\text{ms}$**, không ảnh hưởng đến chu kỳ nhận diện chung.
 
 ---
 
