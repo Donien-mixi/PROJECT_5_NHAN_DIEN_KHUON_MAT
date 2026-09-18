@@ -1,4 +1,4 @@
-﻿# Kích hoạt môi trường & chạy dự án (đồng bộ README/mo_ta_project/KE_HOACH)
+# Kích hoạt môi trường & chạy dự án (đồng bộ README/mo_ta_project/KE_HOACH)
 
 > Chuẩn: `Webcam → center crop/RAW 128 (resize 1 lần) → JPEG q80 → RGB565 → BlazeFace INT8 128 → Bilinear 128→64 → HE (equalize) → Ghost-TinyFace INT8` — `TCP 12345`, `0.60/0.80/3`, `2 LED+Buzzer` — `README.md:57,62,133,161,240` + `mo_ta_project.md:29-48`
 >
@@ -63,75 +63,63 @@ python host_laptop/main.py
 
 ---
 
-## 7. NẠP CODE LÊN ESP32 BẰNG ARDUINO IDE + SERIAL MONITOR
+## 7. BIÊN DỊCH VÀ NẠP FIRMWARE BẰNG ESP-IDF 5.3 + SERIAL MONITOR
 
-### 7.1 Cài 2 thư viện trong Arduino IDE (chỉ lần đầu)
-Mở **Arduino IDE → Tools → Manage Libraries (Ctrl+Shift+I)**, tìm và cài:
-- `TJpg_Decoder` (tác giả Jordi) — giải mã JPEG.
-- `TensorFlowLite_ESP32` (hoặc `TensorFlowLite_ESP32 by tanakamasayuki`) — chạy model INT8.
+### 7.1 Sơ đồ đấu nối phần cứng ngoại vi (ESP32-S3 WROOM-1 N16R8 CAM)
+> **Lưu ý:** Module Camera OV5640 cắm trực tiếp vào socket Freenove/S3-EYE trên bo mạch.
+> Các chân ngoại vi được đấu nối vào Header chân tự do như sau:
+*   **Còi Buzzer:** Chân tín hiệu vào **GPIO 1** (GND nối GND bo mạch).
+*   **LED Xanh Lá (Điểm danh thành công):** Anode (+) qua điện trở 220Ω vào **GPIO 2**, Cathode (-) vào GND.
+*   **LED Đỏ (Người lạ / Từ chối):** Anode (+) qua điện trở 220Ω vào **GPIO 3**, Cathode (-) vào GND.
 
-Ngoài ra phải cài **ESP32 boards package**: `Tools → Board → Boards Manager → tìm "esp32" → cài "esp32 by Espressif Systems"`.
+### 7.2 Nạp Firmware lên ESP32-S3 (ESP-IDF 5.3)
 
-### 7.2 Cấu hình board & cài đặt (Tools)
-Mở file `D:\PROJECT_5_DIEM_DANH_KHUON_MAT\firmware_esp32\firmware_esp32.ino` trong Arduino IDE, sau đó vào **Tools**:
+> **LƯU Ý:** Đóng mọi cửa sổ Serial Monitor (hoặc Arduino IDE) đang chiếm cổng COM trước khi nạp.
 
-| Thiết lập | Chọn giá trị |
-|---|---|
-| Board | `ESP32S3 Dev Module` |
-| Flash Size | `16MB (128Mb)` |
-| Partition Scheme | `Huge APP (3MB No OTA/1MB SPIFFS)` |
-| PSRAM | `OPI PSRAM` (nếu không thấy, chọn `Enabled`) |
-| USB CDC On Boot | `Disabled` (xem giải thích 2 cổng USB bên dưới) |
-| Upload Speed | `921600` |
-| CPU Frequency | `240MHz` |
+#### Cách 1: Nạp một chạm bằng script PowerShell (Khuyên dùng)
+Mở cửa sổ PowerShell (hoặc ESP-IDF PowerShell) và chạy:
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\PROJECT_5_DIEM_DANH_KHUON_MAT\tools\flash_project_5.ps1 -Port COM3
+```
+*(Thay `COM3` bằng cổng thực tế của bạn nếu khác. Script sẽ nạp Bootloader, Partition Table và Firmware chính với tốc độ cao 460800 baud, sau đó tự động bật Serial Monitor)*.
 
-> **⚠️ QUAN TRỌNG — ESP32-S3 DevKit có 2 cổng USB vật lý:**
-> - **"UART"/COM port** (qua chip cầu USB-UART): ROM bootloader **luôn** in output ở đây.
-> - **"USB" port** (native USB CDC): app `Serial` chỉ in ở đây khi `USB CDC On Boot = Enabled`.
->
-> Quy tắc chọn: **cắm cable và monitor cổng nào thì set USB CDC On Boot theo bảng dưới**:
-> | Cổng đang cắm/monitor | USB CDC On Boot |
-> |---|---|
-> | Cổng **"UART"/COM** (khuyên dùng) | **`Disabled`** |
-> | Cổng **"USB"** (native) | `Enabled` |
->
-> Nếu cấu hình lệch, bạn sẽ chỉ thấy output ROM (`ESP-ROM:...`, `entry 0x403c88b8`) rồi **im lặng hoàn toàn** — app vẫn chạy nhưng log đi ra cổng kia. Firmware đã log qua cả 2 kênh (Serial + printf console) nên giờ sẽ luôn thấy ít nhất dòng banner + bộ nhớ.
+#### Cách 2: Nạp trực tiếp qua lệnh idf.py trong cửa sổ ESP-IDF 5.3 PowerShell
+```powershell
+cd D:\PROJECT_5_DIEM_DANH_KHUON_MAT\firmware_esp32
+idf.py -p COM3 flash monitor
+```
+*(Bấm tổ hợp phím `Ctrl + ]` để thoát Serial Monitor).*
 
-> Lưu ý: board phải là **N16R8** (16MB Flash + 8MB Octal PSRAM). Nếu board là bản khác (vd N8R2), đổi Flash/PSRAM tương ứng trong bảng trên.
-> - Cài **ESP32 boards package** bản 3.x (khác API WDT). Không dùng PlatformIO — project đã bỏ `.pio`/`platformio.ini`; chỉ cần Arduino IDE là compile được.
-
-### 7.3 Build & nạp (Verify / Upload)
-- Nhấn **Verify (✓)** để biên dịch. Chờ đến khi báo `Sketch uses ... RAM ... Flash ...`.
-- Cắm ESP32 qua cổng USB, chọn đúng cổng trong **Tools → Port**, nhấn **Upload (→)**.
-- Nếu upload lỗi, thử nhấn nút **BOOT** trên board, hoặc giữ **BOOT** khi upload rồi thả sau vài giây.
-
-### 7.4 Xem Serial Monitor
-- **Tools → Serial Monitor (Ctrl+Shift+M)**, chọn baud `115200`.
-- Chờ vài giây, Serial sẽ in:
-  - `=== ESP32-S3 Face System ... ===` (banner — nếu KHÔNG thấy dòng này → sai cổng USB / USB CDC On Boot lệch, xem bảng 2 cổng ở 7.2).
-  - `RAM int : total=... free=...` và `PSRAM : total=... free=...` (chẩn đoán bộ nhớ).
-  - `PSRAM OK (OPI): 8388608 bytes` — **bắt buộc phải thấy dòng này**; nếu thấy `WARN: PSRAM KHONG DUOC BAT` → vào Tools chọn PSRAM = `OPI PSRAM` rồi upload lại.
-  - `[WiFi] Connected` + địa chỉ IP.
-  - `TCP 12345 listening (packet 32768)`.
-  - `[Detector] Arena used X / 524288` và `[Recognizer] Arena used Y / 524288` (2 model load OK, đủ PSRAM).
-  - `[AITask] ready` và `[HB]` mỗi 2s.
-- **Nếu chỉ thấy ROM boot rồi im lặng** (không có banner `=== ESP32-S3 Face System ===`): **KHÔNG phải lỗi firmware** — là lệch cổng USB/USB CDC On Boot. Xem bảng 2 cổng ở mục 7.2: đổi `USB CDC On Boot` sang giá trị còn lại rồi upload lại, hoặc cắm sang cổng USB kia của board.
-- Nếu thấy `AllocateTensors FAILED` / `Failed to resize buffer` → **arena không đủ** (như lỗi `Requested 442368` lúc trước). Hãy gửi nguyên dòng `Arena used X / Y` cho tôi; thường tăng arena trong `training_tinyml/export_config.py` rồi chạy lại.
-- Nếu thấy `FATAL: ... PSRAM ... fail` → sai PSRAM/partition ở 7.2.
+### 7.3 Log khởi động mẫu trên Serial Monitor
+- Khởi động thành công sẽ in:
+  - `🚀 PROJECT 5: STANDALONE FACE ATTENDANCE SYSTEM (OV5640 CAM)`
+  - `⚡ 100% EDGE AI ON ESP32-S3 N16R8 (ESP-IDF 5.3 + SIMD esp-nn)`
+  - `CPU Freq: 240 MHz`
+  - `Bộ nhớ Octal PSRAM : 8 MB`
+  - `✅ SPIFFS đã mount thành công tại /spiffs`
+  - `📷 [CameraTask] Bắt đầu thu thập ảnh từ OV5640 trên Core 1...`
+  - `🧠 [AITask] Đang khởi tạo mô hình AI trên Core 0 (SIMD esp-nn)...`
+  - `[Detector] Arena used ... (PSRAM, esp-nn SIMD: BẬT)`
+  - `[Recognizer] Arena used ... (PSRAM, esp-nn SIMD: BẬT)`
+  - `[WiFi] Connected kèm IP (ví dụ: http://192.168.1.150)`
+  - `🌐 [Web Server] HTTP Server da khoi dong tren port 80!`
+  - `[PERF] det: ...ms bil: ...us he: ...us rec: ...ms cy: ...` (~0.8s / chu kỳ nhận diện)
+- Nếu Wi-Fi không có sẵn, ESP32 sẽ tự động chạy chế độ **100% OFFLINE độc lập**, nhận diện và báo LED/Buzzer bình thường!
 
 ---
 
-## 8. STREAM CAMERA TỚI ESP32
+## 8. XEM GÓC MÁY CAMERA VÀ LỊCH SỬ ĐIỂM DANH QUA WEB (LỰA CHỌN A)
 
-Sau khi ESP32 đã flash và in ra IP trên Serial Monitor:
+Sau khi ESP32 khởi động và kết nối Wi-Fi, bạn có thể dùng điện thoại hoặc laptop cùng mạng Wi-Fi truy cập:
+👉 `http://<ĐỊA_CHỈ_IP_CỦA_ESP32>/` (ví dụ `http://192.168.1.150`)
 
-```bat
-:: Đổi 192.168.1.XXX thành IP của ESP32 (in trên Serial Monitor)
-python host_laptop/ip_camera_streamer.py --ip 192.168.1.XXX --port 12345
-:: → Chạy HEADLESS (không cửa sổ OpenCV): Laptop chỉ là camera, kết quả xem trên Serial Monitor
-:: → Quan sát trên Serial Monitor: "SUCCESS <tên>" (1 bip ngắn + LED xanh)
-::    hoặc "REJECT UNKNOWN" (2 bip dài + LED đỏ)
-```
+Giao diện Web Dashboard cung cấp:
+1. **Live Camera Preview:** Xem trực tiếp góc máy camera OV5640 với tốc độ cao.
+2. **AI Realtime Status:** Hiển thị tên người đứng trước camera, độ tương đồng Cosine (ví dụ: `nhien - 84.5%`) và trạng thái khớp/người lạ.
+3. **Điều khiển góc máy:** Nút **Lật Dọc (V-Flip)** và **Lật Gương (H-Mirror)** để xoay camera đúng chiều bạn đặt.
+4. **Nhật ký điểm danh:** Xem bảng danh sách điểm danh thời gian thực, nút tải file `/attendance.csv` và nút xóa lịch sử.
+
+> **HOÀN TOÀN ĐỘC LẬP:** Bạn KHÔNG cần mở laptop chạy `ip_camera_streamer.py` nữa! Toàn bộ hệ thống giờ chạy 100% bằng ESP32-S3 và camera OV5640.
 
 > **Lưu ý hiệu năng ESP32 ([4.1 REALTIME] đã bật ESP-NN SIMD):**
 > - **esp-nn vendored** trong `firmware_esp32/esp_nn/` + glue `esp_nn_glue.cpp/.h`.
@@ -204,13 +192,14 @@ python training_tinyml/evaluate_model.py
 python host_laptop/main.py
 :: → Người mới phải được nhận đúng tên; người lạ (không đăng ký) → UNKNOWN
 
-:: D. Nạp lại firmware lên ESP32 (BẮT BUỘC — face_database.h đã thay đổi)
-::    Mở Arduino IDE → mở firmware_esp32\firmware_esp32.ino → Verify → Upload
+:: D. Nạp lại firmware lên ESP32 (BẮT BUỘC khi face_database.h thay đổi)
+powershell -ExecutionPolicy Bypass -File D:\PROJECT_5_DIEM_DANH_KHUON_MAT\tools\flash_project_5.ps1 -Port COM3
+:: hoặc:
+cd D:\PROJECT_5_DIEM_DANH_KHUON_MAT\firmware_esp32 && idf.py -p COM3 flash monitor
 
-:: E. Test trên ESP32
-python host_laptop/ip_camera_streamer.py --ip 192.168.1.XXX --port 12345
-:: → Serial Monitor phải in: 🔍 [AI] Frame hiện tại: <tên-người-mới> (...)
-:: → Đủ 3 frame cùng tên → SUCCESS <tên-người-mới> + LED xanh + 1 bip
+:: E. Đứng trước Camera OV5640 để kiểm tra trực tiếp (100% Standalone)
+:: → Serial Monitor in: 🔍 [AI] Frame hiện tại: <tên-người-mới> (Độ tin cậy: ... >= ngưỡng)
+:: → Đủ 3 frame cùng tên → SUCCESS <tên-người-mới> + LED xanh sáng + 1 tiếng bíp ngắn!
 ```
 
 > **⚠️ BÀI HỌC THỰC TẾ (đã gặp):** ảnh chụp TỐI (độ sáng mean ~42-89 thay vì ~100-155)

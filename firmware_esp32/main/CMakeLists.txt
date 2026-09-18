@@ -1,0 +1,25 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+        "camera_driver.cpp"
+        "ai_face_detector.cpp"
+        "ai_face_recognizer.cpp"
+        "web_server.cpp"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        esp_wifi
+        esp_event
+        nvs_flash
+        esp_psram
+        esp_timer
+        esp_netif
+        lwip
+        driver
+        mbedtls
+        esp_http_server
+        spiffs
+        esp32-camera
+        esp_new_jpeg
+        esp-tflite-micro
+)

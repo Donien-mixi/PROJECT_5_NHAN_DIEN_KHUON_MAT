@@ -4,22 +4,32 @@ Dưới đây là tài liệu mô tả kiến trúc và hợp đồng xử lý c
 
 ---
 
-## 🏗️ PHÂN HỆ 1: `firmware_esp32/` (Vi Điều Khiển Nhúng)
-Chứa mã nguồn C/C++ nạp trực tiếp vào **ESP32-S3** thông qua Arduino IDE. 
-**Nhiệm vụ:** Hoạt động như một "Bộ Não Chạy Biên" (Edge AI). Nó chỉ nhận ảnh qua Wi-Fi và tự chạy suy luận AI.
-**Lưu ý:** ESP32 trong dự án này hoàn toàn **không sử dụng màn hình LCD** — đầu ra duy nhất là **2 LED (xanh = đã nhận diện, đỏ = người lạ) + Buzzer (1 bip ngắn = success, 2 bip dài = reject) + Serial**. Toàn bộ giao diện hiển thị được chuyển hết về máy tính.
+## 🏗️ PHÂN HỆ 1: `firmware_esp32/` (Vi Điều Khiển Nhúng Độc Lập ESP-IDF 5.3)
+Chứa mã nguồn C/C++ nạp trực tiếp vào **ESP32-S3 WROOM-1 N16R8 CAM** thông qua **ESP-IDF 5.3** (tích hợp tăng tốc phần cứng SIMD `esp-nn`). 
+**Nhiệm vụ:** Hoạt động như một **Hệ thống Điểm danh Khuôn mặt Độc lập 100% (Standalone Edge AI)**. Thiết bị gắn trực tiếp module **Camera OV5640**, tự chụp ảnh, tự phát hiện và tự nhận diện khuôn mặt mà **không cần máy tính hay camera IP**.
+**Đầu ra phần cứng:**
+*   **2 LED:** LED Xanh lá (**GPIO 2**) = Điểm danh thành công; LED Đỏ (**GPIO 3**) = Người lạ / Từ chối.
+*   **1 Còi Buzzer:** (**GPIO 1**) = 1 bíp ngắn khi thành công, 2 bíp dài khi người lạ.
+*   **Bộ nhớ Flash SPIFFS:** Lưu file nhật ký điểm danh `/attendance.csv` tự động.
+*   **Web Server HTTP Nền (Port 80):** Cho phép xem live stream camera OV5640, theo dõi kết quả AI realtime, chỉnh lật ảnh và tải file điểm danh ngay trên trình duyệt điện thoại/laptop khi kết nối Wi-Fi (nếu không có Wi-Fi, hệ thống vẫn chạy offline bình thường).
 
-*   `firmware_esp32.ino`: File chính của Arduino IDE (nhạc trưởng). Khởi tạo SPIFFS, Wi-Fi/TCP và các task; **khóa xung nhịp CPU 2 nhân ở 240MHz** (`setCpuFrequencyMhz(240)`); nhận JPEG 128×128 từ `host_laptop`, giải mã về pixel RGB565, sau đó chạy BlazeFace 128 → crop Bilinear → Ghost-TinyFace 64 (Model V3). Hỗ trợ cơ chế **Box-Reuse** (chu kỳ `cy: REUSE` đạt **~1.32s/frame** khi khuôn mặt hợp lệ).
+*   `CMakeLists.txt` & `sdkconfig.defaults`: Cấu hình dự án gốc ESP-IDF 5.3, tối ưu xung nhịp CPU 240MHz, bộ nhớ Octal PSRAM 80MHz OPI, chế độ biên dịch tối ưu tốc độ `-O3` và bật tăng tốc SIMD `esp-nn`.
+*   `partitions.csv`: Bảng phân vùng Flash 16MB chuẩn (4MB App `factory` + 2MB `spiffs`).
+*   `main/main.cpp`: Điểm khởi chạy `app_main` chính của hệ thống ESP-IDF. Khởi tạo NVS, SPIFFS, Camera OV5640 DMA, Web Server và 2 Task FreeRTOS bất đối xứng:
+    *   **Core 1 (`CamTask`):** Chụp ảnh liên tục từ camera OV5640 qua DMA, nạp nhanh vào `g_frame_buffer`.
+    *   **Core 0 (`AITask`):** Độc quyền chạy toàn bộ thuật toán AI: BlazeFace 128 INT8 SIMD → Bilinear Crop 128→64 & HE LUT → Ghost-TinyFace 64 INT8 SIMD (Model V3) → So khớp Cosine MAX-SIM 16 templates → Temporal Voting (3 frame) → Kích hoạt LED/Buzzer và ghi SPIFFS.
+*   `firmware_esp32.ino`: File phác thảo Arduino IDE gốc (được lưu trữ tham khảo).
+*   `camera_pins.h`: Định nghĩa cấu hình chân phần cứng chuẩn cho module **Camera OV5640** (chuẩn Freenove / S3-EYE: `XCLK=15, SIOD=4, SIOC=5, D0..D7=11,9,8,10,12,18,17,16, VSYNC=6, HREF=7, PCLK=13`) và các chân ngoại vi (`BUZZER=GPIO 1, LED_GREEN=GPIO 2, LED_RED=GPIO 3`).
+*   `camera_driver.h` & `camera_driver.cpp`: Trình điều khiển camera OV5640 trực tiếp trên ESP-IDF. Chụp khung hình JPEG vuông 240×240 (1:1), giải mã nhanh qua bộ giải mã phần cứng `esp_new_jpeg` / DMA, center-crop và downscale về 128×128 RGB565 cho AI trong `<0.3ms`. Đồng thời chia sẻ luồng JPEG an toàn luồng cho Web Server.
+*   `web_server.h` & `web_server.cpp`: Web Server HTTP bất đồng bộ (`esp_http_server`) chạy nền. Cung cấp giao diện Dashboard dark-mode hiện đại, xem MJPEG live stream, theo dõi tên & độ tin cậy của người đang đứng trước camera, nút lật ảnh (V-Flip / H-Mirror) và tải/xóa nhật ký điểm danh.
 *   `ai_config.h`: File chứa các tham số bộ nhớ (Arena Size) và cấu hình để ESP32 tự động cấp phát PSRAM/SRAM khi biên dịch (detector 1MB + recognizer 512KB PSRAM — gồm esp-nn scratch buffer — + packet buffer 32KB). Cấu hình ngưỡng chuẩn hóa: `#define FACE_THRESHOLD 0.70f`, `#define DETECTOR_CONF_THRESH 0.80f`, `#define TEMPORAL_VOTES 3`.
 *   `ai_face_detector.h` & `ai_face_detector.cpp`: Chuẩn bị input RGB 128×128 từ buffer RGB565, gọi BlazeFace FULL INT8, giải mã bounding box và crop vuông Bilinear. Tốc độ suy luận đạt ~1.95s nhờ tăng tốc phần cứng SIMD.
-*   `esp_nn/` + `esp_nn_glue.h/.cpp`: **[4.1 REALTIME - ĐÃ HOÀN THÀNH & NGHIỆM THU]** Vendor kernel SIMD `esp-nn v1.3` (Espressif, Apache-2.0) cho CONV_2D/DEPTHWISE_CONV_2D trên Xtensa LX7 — đăng ký qua `resolver.AddConv2D(reg)`. Tích hợp bộ lọc rẽ nhánh thông minh `DwUseEspNn()` để bypass lỗi phần cứng assembly `s8pad` 3x3 của chip ESP32-S3, tự động chuyển về `tflite::reference_integer_ops::DepthwiseConvPerChannel` khi gặp cấu hình lỗi. Nhờ đó đạt **maxdiff = 0** trên `EspNnSelfTest()`, bảo toàn 100% độ chính xác trong khi tăng tốc detector gấp 10.5 lần (~1.95s) và recognizer gấp 4 lần (~1.30s).
-*   `ai_face_recognizer.h` & `ai_face_recognizer.cpp`: Nạp mô hình nhận diện Ghost-TinyFace INT8 64×64 Model V3, trích xuất vector 128 chiều, so khớp Cosine MAX-SIM với `face_database.h`. `identify_face` áp per-identity threshold (`max(0.70, ngưỡng riêng 0.75)` — argmax trước, ngưỡng sau).
-*   `wifi_udp_server.h` & `wifi_udp_server.cpp`: Tên file được giữ để tương thích, nhưng giao thức thực tế là TCP port 12345. Module có trách nhiệm cấp phát buffer PSRAM, đọc đủ header độ dài và payload, đồng thời có timeout/reconnect an toàn. **(Phase 4.1):** Xóa bỏ ràng buộc `!is_new_frame_available`, cho phép Core 1 liên tục giải mã và ghi đè JPEG mới nhất vào `g_frame_buffer`. Loại bỏ hoàn toàn độ trễ hàng đợi 5s của pipeline cũ; Core 0 luôn nhận được frame tức thời (<50ms delay).
-*   `image_decoder.h` & `image_decoder.cpp`: Giải mã JPEG 128×128 thành buffer pixel RGB565 128×128 cho AI thông qua `TJpg_Decoder`.
+*   `esp_nn/` + `esp_nn_glue.h/.cpp`: Vendor kernel SIMD `esp-nn v1.3` (Espressif, Apache-2.0) cho CONV_2D/DEPTHWISE_CONV_2D trên Xtensa LX7 — tích hợp bộ lọc `DwUseEspNn()` bypass lỗi assembly `s8pad` 3x3, đạt **maxdiff = 0** trên `EspNnSelfTest()`, bảo toàn 100% độ chính xác trong khi tăng tốc detector gấp 10.5 lần (~1.95s) và recognizer gấp 4 lần (~1.30s).
+*   `ai_face_recognizer.h` & `ai_face_recognizer.cpp`: Nạp mô hình nhận diện Ghost-TinyFace INT8 64×64 Model V3, trích xuất vector 128 chiều, so khớp Cosine MAX-SIM với `face_database.h`. `identify_face` áp per-identity threshold (`max(0.70, ngưỡng riêng 0.75)` — argmax trước, ngưỡng sau), cập nhật `g_last_recognized_score` sang Web Server.
 *   `face_database.h`: Chứa 16 embedding 128-D (templates) cho mỗi người dùng; matching trên ESP32 lấy MAX-SIM đồng bộ với Laptop. Cấu trúc `RegisteredFace` lưu trường `threshold` (0.75f cho cả 3 người dùng `nhien`, `thao`, `toan`).
 *   `model_data.h`: C array của model Ghost-TinyFace INT8 64×64 (Model V3 trained với CASIA-WebFace + ArcFace + Illumination KD); kích thước artifact thực tế ~160KB.
 *   `detector_model_data.h`: C array của model BlazeFace FULL INT8 128×128; kích thước artifact thực tế ~183KB.
-*   ~~`platformio.ini`~~: Đã loại bỏ — project hiện build 100% bằng **Arduino IDE** (ESP32 Arduino core 3.x). Không còn PlatformIO/`.pio`.
+*   ~~`wifi_udp_server.cpp`~~ & ~~`image_decoder.cpp`~~: Đã được vô hiệu hóa bằng `#if 0` (được thay thế toàn diện bởi `camera_driver.cpp` và `web_server.cpp`).
 
 ---
 

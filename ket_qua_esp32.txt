@@ -1,9 +1,25 @@
-[WiFi] Connecting to Phong 2
-Tasks created
-[AITask] setup detectors
+=== ESP32-S3 Face Attendance Standalone (OV5640 Camera) ===
+CPU Freq: 240 MHz
+RAM int : total=268568 free=228076
+PSRAM   : total=8388608 free=8384788
+Flash   : 16777216 bytes
+✅ PSRAM OK (OPI): 8388608 bytes
+✅ SPIFFS OK
+
+[*] Đang khởi tạo Camera OV5640...
+✅ Camera OV5640 init thành công! (PID: 0x5640)
+
+[WiFi] Dang ket noi toi: Phong 2 ...
+..............
+✅ [WiFi] Da ket noi thanh cong!
+👉 Dia chi IP ESP32: http://192.168.2.32
+🌐 [Web Server] HTTP Server da khoi dong tren port 80!
+📷 [CameraTask] Bat dau thu thap anh tu OV5640 tren Core 1...
+🧠 [AITask] Dang khoi tao mo hinh AI tren Core 0...
 Khoi tao BlazeFace 128...
-[HB] WiFi connecting 2s
+🚀 [System] He thong da khoi dong xong tat ca cac task!
 Frame buffer 32KB PSRAM OK
+[HB] Web UI: http://192.168.2.32 | Uptime: 5s | Free PSRAM: 7017012 | Free Heap: 92624
 [Detector] Arena used 602216 / 1048576
 Khoi tao TFLite Micro Face Recognizer...
 [Recognizer] Arena used 186588 / 524288
@@ -16,67 +32,21 @@ Khoi tao TFLite Micro Face Recognizer...
 [ESPNN-TEST] conv 1x1_1ch (in=16x16x1 f=1x1 out=16) maxdiff=0 scratch=2368
 [ESPNN-TEST] dw opt (in=8x8x6 f=3x3) maxdiff=0 scratch=1792
 [ESPNN-TEST] SUMMARY conv_maxdiff=0 dwconv_maxdiff=0 PASS
-[AITask] ready
-...
-[WiFi] Connected
-192.168.2.31
-TCP 12345 listening (packet 32768)
-[HB] IP 192.168.2.31 TCP 12345 Uptime 4s
-[HB] IP 192.168.2.31 TCP 12345 Uptime 6s
-[Net] Client connected
-[HB] IP 192.168.2.31 TCP 12345 Uptime 8s
-[BOX] score=0.91 cx=63.2 cy=95.2 size=61.9 -> 62x62 @(32,64)
-[CROP] mean=84.5 var=1718.0 -> HE mean=127.9 var=5404.1 box=(63.2,95.2) s=61.9
-[HB] IP 192.168.2.31 TCP 12345 Uptime 10s
-[PERF] det:1949.33ms bil:5301us he:393us rec:1306.98ms dec:17238us cy:DETECT
-🔍 [AI] Frame hiện tại: Unknown (best nhien 0.79 < ngưỡng 0.80)
-[HB] IP 192.168.2.31 TCP 12345 Uptime 12s
-[BOX] score=0.91 cx=65.0 cy=96.1 size=61.3 -> 61x61 @(34,65)
-[CROP] mean=92.3 var=1804.9 -> HE mean=127.9 var=5410.1 box=(65.0,96.1) s=61.3
-[PERF] det:1943.85ms bil:5300us he:868us rec:1310.87ms dec:17214us cy:DETECT
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.82, ngưỡng 0.80)
-[CROP] mean=92.1 var=1830.3 -> HE mean=127.9 var=5411.2 box=(65.0,96.1) s=61.3
-[HB] IP 192.168.2.31 TCP 12345 Uptime 14s
-[PERF] det:0.00ms bil:5943us he:399us rec:1298.66ms dec:17118us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.80, ngưỡng 0.80)
-[CROP] mean=92.5 var=1783.8 -> HE mean=128.0 var=5407.2 box=(65.0,96.1) s=61.3
-[HB] IP 192.168.2.31 TCP 12345 Uptime 16s
-[PERF] det:0.00ms bil:6669us he:428us rec:1300.93ms dec:17021us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.84, ngưỡng 0.80)
-SUCCESS nhien
-Saved nhien
-[CROP] mean=90.6 var=1802.0 -> HE mean=128.0 var=5414.0 box=(65.0,96.1) s=61.3
-[PERF] det:0.00ms bil:5172us he:394us rec:1306.45ms dec:17191us cy:REUSE
-🔍 [AI] Frame hiện tại: Unknown (best nhien 0.79 < ngưỡng 0.80)
-[CROP] mean=91.4 var=1822.3 -> HE mean=128.0 var=5407.0 box=(65.0,96.1) s=61.3
-[HB] IP 192.168.2.31 TCP 12345 Uptime 18s
-[PERF] det:0.00ms bil:5207us he:392us rec:1305.80ms dec:17036us cy:REUSE
-🔍 [AI] Frame hiện tại: Unknown (best nhien 0.80 < ngưỡng 0.80)
-[HB] IP 192.168.2.31 TCP 12345 Uptime 20s
-[BOX] score=0.91 cx=66.2 cy=96.7 size=61.5 -> 61x62 @(35,65)
-[CROP] mean=90.1 var=1741.5 -> HE mean=127.9 var=5415.0 box=(66.2,96.7) s=61.5
-[HB] IP 192.168.2.31 TCP 12345 Uptime 22s
-[PERF] det:1953.66ms bil:5301us he:393us rec:1298.55ms dec:17215us cy:DETECT
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.82, ngưỡng 0.80)
-[CROP] mean=89.5 var=1731.4 -> HE mean=127.8 var=5423.1 box=(66.2,96.7) s=61.5
-[PERF] det:0.00ms bil:6802us he:393us rec:1288.96ms dec:17189us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.81, ngưỡng 0.80)
-[CROP] mean=89.5 var=1728.6 -> HE mean=127.9 var=5415.8 box=(66.2,96.7) s=61.5
-[HB] IP 192.168.2.31 TCP 12345 Uptime 24s
-[PERF] det:0.00ms bil:8674us he:401us rec:1289.82ms dec:17122us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.81, ngưỡng 0.80)
-[CROP] mean=89.3 var=1719.5 -> HE mean=128.0 var=5404.7 box=(66.2,96.7) s=61.5
-[HB] IP 192.168.2.31 TCP 12345 Uptime 26s
-[PERF] det:0.00ms bil:12992us he:394us rec:1298.00ms dec:17202us cy:REUSE
-🔍 [AI] Frame hiện tại: nhien (Độ tin cậy: 0.80, ngưỡng 0.80)
-SUCCESS nhien
-Saved nhien
-[CROP] mean=86.4 var=1938.1 -> HE mean=128.0 var=5392.2 box=(66.2,96.7) s=61.5
-[HB] IP 192.168.2.31 TCP 12345 Uptime 28s
-[PERF] det:0.00ms bil:5173us he:395us rec:1311.86ms dec:17114us cy:REUSE
-🔍 [AI] Frame hiện tại: Unknown (best nhien 0.71 < ngưỡng 0.80)
-[CROP] mean=101.1 var=3155.1 -> HE mean=127.8 var=5397.6 box=(66.2,96.7) s=61.5
-ESP-ROM:esp32s3-20210327
-Build:Mar 27 2021
-rst:0x1 (POWERON),boot:0x0 (DOWNLOAD(USB/UART0))
-waiting for download
+✅ [AITask] Mo hinh AI da san sang!
+Guru Meditation Error: Core  1 panic'ed (Unhandled debug exception). 
+Debug exception reason: Stack canary watchpoint triggered () 
+Core  1 register dump:
+PC      : 0x4037f112  PS      : 0x00060036  A0      : 0x8038050b  A1      : 0x3fccf720  
+A2      : 0x3fc983fc  A3      : 0xffffffff  A4      : 0x00000000  A5      : 0x00000000  
+A6      : 0x00060823  A7      : 0x00000000  A8      : 0x00060023  A9      : 0x3fccf720  
+A10     : 0x00060023  A11     : 0x00000003  A12     : 0x00060023  A13     : 0x1de90000  
+A14     : 0x00000002  A15     : 0x00000004  SAR     : 0x0000000e  EXCCAUSE: 0x00000001  
+EXCVADDR: 0x00000000  LBEG    : 0x400556d5  LEND    : 0x400556e5  LCOUNT  : 0xfffffffe  
+
+
+Backtrace: 0x4037f10f:0x3fccf720 0x40380508:0x3fccf750 0x4037f458:0x3fccf780 0x4037f44e:0xa5a5a5a5 |<-CORRUPTED
+
+
+
+
+ELF file SHA256: d42bafa7b

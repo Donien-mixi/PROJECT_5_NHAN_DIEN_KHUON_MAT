@@ -1,3 +1,10 @@
+// =============================================================================
+// DEPRECATED: image_decoder.cpp
+// Thay thế bởi camera_driver.cpp (sử dụng camera OV5640 với giải mã trực tiếp)
+// Được vô hiệu hóa để tránh xung đột callback khi biên dịch với Arduino IDE.
+// =============================================================================
+#if 0
+
 #include "image_decoder.h"
 #include "ai_face_detector.h"
 
@@ -35,3 +42,5 @@ void decode_jpeg_frame(const uint8_t* jpeg_data, uint32_t length) {
         Serial.printf("[JPEG] decode FAIL code=%d len=%lu\n", res, (unsigned long)length);
     }
 }
+
+#endif // 0 - DEPRECATED

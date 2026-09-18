@@ -26,6 +26,7 @@ env/
 # ESP-IDF
 build/
 sdkconfig.old
+managed_components/
 
 # OS generated files
 .DS_Store

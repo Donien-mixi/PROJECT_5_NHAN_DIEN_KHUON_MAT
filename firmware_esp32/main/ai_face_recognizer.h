@@ -16,4 +16,4 @@ void extract_face_embedding(const float* input_tensor, float* output_embedding);
 extern float g_last_recognized_score;
 const char* identify_face(const float* face_embedding, float threshold = 0.60f);
 
-#endif
+#endif // AI_FACE_RECOGNIZER_H
