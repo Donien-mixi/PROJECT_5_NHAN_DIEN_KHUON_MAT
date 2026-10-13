@@ -39,3 +39,12 @@ Thumbs.db
 
 # Large dataset files (>100MB)
 faces_webface_112x112.zip
+
+# Tai lieu huong dan noi bo (chi giu o local, khong push len GitHub)
+HUONG_DAN_COLAB_TRAIN_V2.md
+HUONG_DAN_COLAB_TRAIN_V3.md
+HUONG_DAN_GIAI_DOAN_4.md
+kich_hoat_moi_truong.md
+
+# IDE
+.vscode/

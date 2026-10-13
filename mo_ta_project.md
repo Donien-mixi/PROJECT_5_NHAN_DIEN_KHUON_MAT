@@ -1,194 +1,110 @@
-# 📖 MÔ TẢ CHI TIẾT TẤT CẢ CÁC THƯ MỤC VÀ TỪNG FILE TRONG TOÀN BỘ DỰ ÁN
+# Mô tả chi tiết các thư mục và file trong project
 
-Dưới đây là tài liệu mô tả kiến trúc và hợp đồng xử lý của hệ thống. Dự án được chia thành 3 phân hệ chính (firmware/host/training) + 1 giai đoạn vận hành. Các phân hệ có thể phát triển riêng, nhưng phải giữ nguyên các hợp đồng chung về model, tensor, pixel, protocol và database để tránh lệch khi chuyển từ Laptop xuống ESP32.
-
----
-
-## 🏗️ PHÂN HỆ 1: `firmware_esp32/` (Vi Điều Khiển Nhúng Độc Lập ESP-IDF 5.3)
-Chứa mã nguồn C/C++ nạp trực tiếp vào **ESP32-S3 WROOM-1 N16R8 CAM** thông qua **ESP-IDF 5.3** (tích hợp tăng tốc phần cứng SIMD `esp-nn`). 
-**Nhiệm vụ:** Hoạt động như một **Hệ thống Điểm danh Khuôn mặt Độc lập 100% (Standalone Edge AI)**. Thiết bị gắn trực tiếp module **Camera OV5640**, tự chụp ảnh, tự phát hiện và tự nhận diện khuôn mặt mà **không cần máy tính hay camera IP**.
-**Đầu ra phần cứng:**
-*   **2 LED:** LED Xanh lá (**GPIO 2**) = Điểm danh thành công; LED Đỏ (**GPIO 3**) = Người lạ / Từ chối.
-*   **1 Còi Buzzer:** (**GPIO 1**) = 1 bíp ngắn khi thành công, 2 bíp dài khi người lạ.
-*   **Bộ nhớ Flash SPIFFS:** Lưu file nhật ký điểm danh `/attendance.csv` tự động.
-*   **Web Server HTTP Nền (Port 80):** Cho phép xem live stream camera OV5640, theo dõi kết quả AI realtime, chỉnh lật ảnh và tải file điểm danh ngay trên trình duyệt điện thoại/laptop khi kết nối Wi-Fi (nếu không có Wi-Fi, hệ thống vẫn chạy offline bình thường).
-
-*   `CMakeLists.txt` & `sdkconfig.defaults`: Cấu hình dự án gốc ESP-IDF 5.3, tối ưu xung nhịp CPU 240MHz, bộ nhớ Octal PSRAM 80MHz OPI, chế độ biên dịch tối ưu tốc độ `-O3` và bật tăng tốc SIMD `esp-nn`.
-*   `partitions.csv`: Bảng phân vùng Flash 16MB chuẩn (4MB App `factory` + 2MB `spiffs`).
-*   `main/main.cpp`: Điểm khởi chạy `app_main` chính của hệ thống ESP-IDF. Khởi tạo NVS, SPIFFS, Camera OV5640 DMA, Web Server và 2 Task FreeRTOS bất đối xứng:
-    *   **Core 1 (`CamTask`):** Chụp ảnh liên tục từ camera OV5640 qua DMA, nạp nhanh vào `g_frame_buffer`.
-    *   **Core 0 (`AITask`):** Độc quyền chạy toàn bộ thuật toán AI: BlazeFace 128 INT8 SIMD → Bilinear Crop 128→64 & HE LUT → Ghost-TinyFace 64 INT8 SIMD (Model V3) → So khớp Cosine MAX-SIM 16 templates → Temporal Voting (3 frame) → Kích hoạt LED/Buzzer và ghi SPIFFS.
-*   `firmware_esp32.ino`: File phác thảo Arduino IDE gốc (được lưu trữ tham khảo).
-*   `camera_pins.h`: Định nghĩa cấu hình chân phần cứng chuẩn cho module **Camera OV5640** (chuẩn Freenove / S3-EYE: `XCLK=15, SIOD=4, SIOC=5, D0..D7=11,9,8,10,12,18,17,16, VSYNC=6, HREF=7, PCLK=13`) và các chân ngoại vi (`BUZZER=GPIO 1, LED_GREEN=GPIO 2, LED_RED=GPIO 3`).
-*   `camera_driver.h` & `camera_driver.cpp`: Trình điều khiển camera OV5640 trực tiếp trên ESP-IDF. Chụp khung hình JPEG vuông 240×240 (1:1), giải mã nhanh qua bộ giải mã phần cứng `esp_new_jpeg` / DMA, center-crop và downscale về 128×128 RGB565 cho AI trong `<0.3ms`. Đồng thời chia sẻ luồng JPEG an toàn luồng cho Web Server.
-*   `web_server.h` & `web_server.cpp`: Web Server HTTP bất đồng bộ (`esp_http_server`) chạy nền. Cung cấp giao diện Dashboard dark-mode hiện đại, xem MJPEG live stream, theo dõi tên & độ tin cậy của người đang đứng trước camera, nút lật ảnh (V-Flip / H-Mirror) và tải/xóa nhật ký điểm danh.
-*   `ai_config.h`: File chứa các tham số bộ nhớ (Arena Size) và cấu hình để ESP32 tự động cấp phát PSRAM/SRAM khi biên dịch (detector 1MB + recognizer 512KB PSRAM — gồm esp-nn scratch buffer — + packet buffer 32KB). Cấu hình ngưỡng chuẩn hóa: `#define FACE_THRESHOLD 0.70f`, `#define DETECTOR_CONF_THRESH 0.80f`, `#define TEMPORAL_VOTES 3`.
-*   `ai_face_detector.h` & `ai_face_detector.cpp`: Chuẩn bị input RGB 128×128 từ buffer RGB565, gọi BlazeFace FULL INT8, giải mã bounding box và crop vuông Bilinear. Tốc độ suy luận đạt ~1.95s nhờ tăng tốc phần cứng SIMD.
-*   `esp_nn/` + `esp_nn_glue.h/.cpp`: Vendor kernel SIMD `esp-nn v1.3` (Espressif, Apache-2.0) cho CONV_2D/DEPTHWISE_CONV_2D trên Xtensa LX7 — tích hợp bộ lọc `DwUseEspNn()` bypass lỗi assembly `s8pad` 3x3, đạt **maxdiff = 0** trên `EspNnSelfTest()`, bảo toàn 100% độ chính xác trong khi tăng tốc detector gấp 10.5 lần (~1.95s) và recognizer gấp 4 lần (~1.30s).
-*   `ai_face_recognizer.h` & `ai_face_recognizer.cpp`: Nạp mô hình nhận diện Ghost-TinyFace INT8 64×64 Model V3, trích xuất vector 128 chiều, so khớp Cosine MAX-SIM với `face_database.h`. `identify_face` áp per-identity threshold (`max(0.70, ngưỡng riêng 0.75)` — argmax trước, ngưỡng sau), cập nhật `g_last_recognized_score` sang Web Server.
-*   `face_database.h`: Chứa 16 embedding 128-D (templates) cho mỗi người dùng; matching trên ESP32 lấy MAX-SIM đồng bộ với Laptop. Cấu trúc `RegisteredFace` lưu trường `threshold` (0.75f cho cả 3 người dùng `nhien`, `thao`, `toan`).
-*   `model_data.h`: C array của model Ghost-TinyFace INT8 64×64 (Model V3 trained với CASIA-WebFace + ArcFace + Illumination KD); kích thước artifact thực tế ~160KB.
-*   `detector_model_data.h`: C array của model BlazeFace FULL INT8 128×128; kích thước artifact thực tế ~183KB.
-*   ~~`wifi_udp_server.cpp`~~ & ~~`image_decoder.cpp`~~: Đã được vô hiệu hóa bằng `#if 0` (được thay thế toàn diện bởi `camera_driver.cpp` và `web_server.cpp`).
+Project chia làm 3 phần chính, cộng thêm phần tài liệu. Ba phần phải "nói chuyện" khớp với nhau (cùng model, cùng cách xử lý ảnh, cùng dữ liệu) để khi chuyển từ laptop xuống chip không bị lệch.
 
 ---
 
-## 💻 PHÂN HỆ 2: `host_laptop/` (Trạm Phát & Trạm Quản Lý Giao Diện)
-Chứa mã nguồn Python chạy trên máy tính. 
-**Nhiệm vụ:** Truyền camera tới ESP32, hiển thị giao diện HUD công nghệ cao, quản lý thêm người dùng và ghi log SQL. Không can thiệp vào thuật toán nhận diện bên trong ESP32.
+## Phần 1: `firmware_esp32/` — Code chạy trên chip ESP32-S3
 
-*   `main.py`: File điều phối chính, HUD và SQLite. Khi test E2E phải dùng cùng frame contract với ESP32: center crop/resize RAW 128 → JPEG decode → mô phỏng RGB565 → BlazeFace → Bilinear 128→64 → Ghost-TinyFace → Cosine, cùng normalize và voting. Ngưỡng mặc định đồng bộ: 0.70.
-*   `ip_camera_streamer.py`: Đọc webcam, center-crop vuông, resize một lần về 128×128, encode JPEG quality 80 và truyền frame có header độ dài qua TCP port 12345. Đây là dumb camera, không nhận diện. Đã bổ sung `cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)` và `sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)` để loại bỏ triệt để độ trễ buffer driver webcam và thuật toán Nagle. Bỏ 15 frame warm-up đầu để tránh điểm thấp do auto-exposure.
-*   `enroll_tool.py`: Thu ảnh người dùng mới theo quy tắc 15-20 ảnh/người và khoảng 70/30 pose. Frame được đưa qua đường JPEG và detector/crop trước khi lưu ảnh grayscale 64×64; Laptop mô phỏng RGB565 để khớp tuyệt đối với ESP32.
-*   `convert_tflite_to_c.py`: Script nhỏ để đổi file `.tflite` INT8 thành `.h` (dùng cho detector & recognizer).
-*   **`core/vision_utils.py`**: `prepare_esp32_frame`, `center_crop_to_raw`, Bilinear 128→64, `equalize_gray_256` (HE LUT), `rgb565_roundtrip` — hợp đồng pixel đồng bộ ESP32.
-*   **`detector/blazeface_esp32.py`** & `face_detection_short_range*.tflite`: `UnifiedFaceDetector` INT8 128×128 — mô phỏng RGB565, Bilinear `scale=box_size/64`, HE, normalize như C++.
-*   **`recognizer/face_recognizer.py`**: `FaceRecognizer` (TFLite INT8 → 128-D, L2-norm, cosine MAX-SIM 16 templates, threshold 0.70/0.75) + `TemporalVoter` (3 frame, pause-on-Unknown max 2).
-*   **`database/db_manager.py`**: SQLite `attendance.db` + cooldown 30s chống spam.
-*   **`ui/hud_renderer.py`**: Vẽ HUD OpenCV trên **màn hình Laptop/PC**, không phải LCD gắn ESP32 — ESP32 chỉ dùng 2 LED + Buzzer.
+Đây là code nạp vào chip **ESP32-S3 WROOM-1 N16R8 CAM** bằng **ESP-IDF 5.3**.
 
-### HỢP ĐỒNG ĐỒNG NHẤT LAPTOP ↔ ESP32
+**Nhiệm vụ:** Chạy như một máy điểm danh khuôn mặt hoàn chỉnh, tự chụp ảnh, tự tìm mặt, tự nhận diện, không cần máy tính.
 
-Hai bên phải dùng cùng một hợp đồng xử lý, không chỉ cùng kích thước ảnh:
+**Thiết bị báo kết quả:**
+- **LED xanh** (GPIO 2): điểm danh thành công.
+- **LED đỏ** (GPIO 3): người lạ, bị từ chối.
+- **Còi** (GPIO 1): 1 tiếng bíp ngắn khi thành công, 2 tiếng bíp dài khi người lạ.
+- **Bộ nhớ trong chip:** tự lưu danh sách điểm danh vào file `/attendance.csv`.
+- **Web server:** xem camera trực tiếp, xem tên đang nhận diện, đổi chiều ảnh, tải danh sách điểm danh qua trình duyệt điện thoại/laptop. Không có Wi-Fi thì vẫn chạy bình thường.
 
-1. Webcam được center-crop vuông và resize một lần về RAW 128×128.
-2. Streamer encode JPEG quality 80, bảo đảm payload không vượt buffer 32KB, thêm length header 4 byte little-endian và gửi qua TCP 12345.
-3. Laptop test và ESP32 phải dùng cùng JPEG. Laptop phải mô phỏng bước ESP32 giải mã vào RGB565 trước detector/crop, hoặc firmware phải đổi sang một biểu diễn pixel chung đã được xác minh.
-4. Detector phải dùng cùng input quantization, anchor/decode box và confidence threshold (0.80).
-5. Crop mặt phải là crop vuông Bilinear thủ công 128→64 với cùng half-pixel formula, clamp và cách làm tròn, sau đó áp **Histogram Equalization (LUT số nguyên)** khử nhạy ánh sáng — cài đặt bit-exact ở cả Python (`equalize_gray_256`) và C++ (`equalize_gray_u8`).
-6. Recognizer phải dùng cùng normalize `(gray - 127.5) / 128.0`, dequantize output và L2-normalize trước matching. Matching phải là MAX-SIM trên 16 templates/người ở CẢ Laptop và ESP32 (không dùng centroid đơn) để đồng bộ độ chính xác.
-7. Ngưỡng nhận diện áp dụng chiến lược 2 cấp đồng bộ: Global Threshold = 0.70 và Per-identity Threshold Cap = 0.75 (hiện tại cả `nhien`, `thao`, `toan` đều có threshold 0.75).
+**Các file:**
 
----
-
-## 🧠 PHÂN HỆ 3: `training_tinyml/` (Xưởng Đào Tạo Trí Tuệ Nhân Tạo)
-Đây là phân hệ huấn luyện/export, tách khỏi runtime nhưng cung cấp artifact và contract mà host/firmware cùng sử dụng.
-Hệ thống tuân thủ chuẩn **Zero-Retraining**: AI học đặc trưng chung (Universal) từ tập **CASIA-WebFace** quy mô lớn chuẩn quốc tế (28,102 ảnh / 1,198 danh tính thông qua Pure Python RecordIO reader cực nhanh) kết hợp **ArcFace loss** ($s=30.0, m=0.30$) và **Illumination-invariance KD** (Teacher SFace 38MB dạy Student Ghost-TinyFace 64×64 Grayscale). Thêm người mới chỉ cần chụp 20 ảnh và trích xuất embedding database, hoàn toàn không cần train lại model AI.
-
-*   `download_casia_dataset.py`: Trích xuất trực tiếp tập CASIA-WebFace từ `faces_webface_112x112.zip` bằng Pure Python RecordIO extractor siêu tốc (~11,000 ảnh/giây), tự động sinh ảnh 64×64 Grayscale cho Student và 112×112 BGR cho Teacher.
-*   `train_distillation.py`: Huấn luyện Model V3 trên Google Colab T4 GPU: Teacher SFace (38MB) dạy Student Ghost-TinyFace 64×64 bằng **KD (Cosine + MSE + Hard-Negative) + ArcFace loss** ($s=30.0, m=0.30$) + **Illumination-invariance KD** (teacher nhúng ảnh sạch, student nhận ảnh augment sáng/tối + HE LUT 256-bin) — giải quyết triệt để bài toán nhầm người và nhạy cảm ánh sáng.
-*   `quantize_qat_int8.py`: Export Ghost-TinyFace Model V3 sang INT8 (`tinyface_int8.tflite` ~160KB); representative dataset có HE đồng bộ inference.
-*   `quantize_detector_int8.py`: PTQ BlazeFace (float16-hybrid) → FULL INT8 (~183KB) giữ nguyên topo 2-output; validate maxdiff < 1e-3 rồi mới quantize.
-*   `generate_embeddings.py`: TFLite INT8 → 128-D, L2-norm, Trimmed 80% (MAX-SIM 16 templates/người) + **per-identity threshold** (`cross_max + 0.02`, floor `GLOBAL_THRESHOLD = 0.70`, cap `PER_ID_CAP = 0.75`) ghi vào `data/face_database.json` và struct C++ `firmware_esp32/face_database.h`.
-*   `update_face_database.py`: (Công cụ hàng ngày) Quét `registered_faces` → `face_database.json` + `firmware_esp32/face_database.h` + regenerate `ai_config.h`. **Thêm người mới chỉ cần enroll 20 ảnh → chạy file này → flash ESP32, không train lại (Zero-Retraining).**
-*   `export_config.py`: Sinh `ai_config.h` (Arena PSRAM: Detector 1MB, Recognizer 512KB, Packet Buffer 32KB, RAW 128, FACE 64, THRESHOLD 0.70/0.80, VOTES 3).
-*   `evaluate_model.py`: Benchmark similarity, TAR/FAR, threshold tối ưu, **Top-1 Identification MAX-SIM 16 templates** đạt **100.0% (12/12 probe, 20/20 per identity)**, FRR@0.70 = 0.0%.
-*   `colab_exports/`: Bản copy `model_data.h` / `face_database.h` xuất từ Colab khi hoàn thành train.
+* `CMakeLists.txt` và `sdkconfig.defaults`: cấu hình build, cho chip chạy 240MHz, bật RAM ngoài PSRAM 8MB, tối ưu tốc độ, bật tăng tốc tính toán SIMD.
+* `partitions.csv`: chia bộ nhớ flash 16MB (4MB cho app, 2MB cho dữ liệu SPIFFS).
+* `main/main.cpp`: file khởi động chính. Khởi tạo bộ nhớ, camera, web server, và 2 việc chạy song song trên 2 nhân:
+  - **Nhân 1 (CameraTask):** liên tục chụp ảnh từ camera đưa vào bộ đệm.
+  - **Nhân 0 (AITask):** chạy toàn bộ AI: tìm mặt → cắt và chỉnh sáng → nhận diện → so khớp → đếm 3 ảnh → bật LED/còi và ghi điểm danh.
+* `firmware_esp32.ino`: bản Arduino cũ, giữ lại để tham khảo.
+* `camera_pins.h`: khai báo chân cắm camera OV5640 và chân còi/LED.
+* `camera_driver.h/.cpp`: điều khiển camera OV5640, chụp ảnh 240x240, thu nhỏ về 128x128 cho AI. Đồng thời chia sẻ ảnh cho web server.
+* `web_server.h/.cpp`: web server chạy nền, có giao diện web xem camera trực tiếp, xem tên và độ tin cậy, nút lật ảnh, tải/xóa danh sách điểm danh.
+* `ai_config.h`: chứa các thông số chung (kích thước ảnh, ngưỡng, kích thước bộ nhớ). File này được sinh tự động, đừng sửa tay.
+* `ai_face_detector.h/.cpp`: tìm khuôn mặt bằng BlazeFace, cắt vuông khuôn mặt và cắt về 64x64.
+* `esp_nn/` và `esp_nn_glue.h/.cpp`: bộ tăng tốc tính toán của nhà sản xuất chip, giúp AI chạy nhanh hơn nhiều lần. Có xử lý một lỗi nhỏ của bộ tăng tốc để giữ kết quả chính xác.
+* `ai_face_recognizer.h/.cpp`: model nhận diện Ghost-TinyFace, tạo ra 128 số đặc trưng, so khớp với dữ liệu và trả về tên người khớp nhất.
+* `face_database.h`: dữ liệu khuôn mặt 3 người (nhien, thao, toan), mỗi người 16 mẫu, mỗi mẫu 128 số.
+* `model_data.h`: model nhận diện dưới dạng mảng số, khoảng 160KB.
+* `detector_model_data.h`: model tìm mặt dưới dạng mảng số, khoảng 183KB.
+* `wifi_udp_server.cpp` và `image_decoder.cpp`: code cũ (nhận ảnh từ laptop qua Wi-Fi), đã tắt vì không dùng nữa.
 
 ---
 
-## 📂 CÁC THƯ MỤC LƯU TRỮ VÀ TÀI LIỆU (DATA & DOCS)
+## Phần 2: `host_laptop/` — Code chạy trên laptop
 
-### Thư mục `data/` (Kho lưu trữ dữ liệu tĩnh)
-*   `registered_faces/nhien|thao|toan/`: Mỗi người **20 PNG 64×64 grayscale** (20/20/20) — HE và Bilinear đã áp ở enroll; kiểm tra tỷ lệ pose 70/30 trước khi tạo database.
-*   `face_database.json`: JSON trung gian — **16 templates/người × 128-D** (MAX-SIM, threshold 0.75 per-identity).
-*   `attendance.db`: SQLite log điểm danh.
+Code Python dùng trên máy tính để **test** và **quản lý**. Phần này không tham gia vào lúc chạy thật trên chip.
 
-### CÁC FILE QUÁ HẠN (OBSOLETE / ĐÃ LOẠI BỎ)
-*Hệ thống cũ có một số file, nay do chuyển sang Zero-Retraining nên không bao giờ dùng tới nữa (bạn có thể xóa tự do để sạch project):*
-*   🗑️ `training_tinyml/finetune_locally.py`
-*   🗑️ `training_tinyml/dataset_loader.py`
-*   🗑️ `training_tinyml/fix_and_evaluate.py`
-*   🗑️ `training_tinyml/find_bad_photos.py`
+* `main.py`: chạy thử toàn bộ quy trình trên laptop và hiện cửa sổ HUD (bảng thông tin). Dùng đúng cách xử lý ảnh như ESP32 để kết quả khớp.
+* `ip_camera_streamer.py`: biến laptop thành "camera ngố" — chỉ đọc webcam, thu nhỏ ảnh 128x128, nén JPEG và gửi qua TCP cổng 12345. Không nhận diện gì cả.
+* `enroll_tool.py`: thu 20 ảnh cho một người mới. Từ chối ảnh quá tối hoặc quá sáng để dữ liệu tốt.
+* `convert_tflite_to_c.py`: đổi file model `.tflite` thành file `.h` để nhúng vào firmware.
+* `core/vision_utils.py`: các hàm xử lý ảnh dùng chung — cắt vuông, chuyển màu giống ESP32, chỉnh sáng đều (HE), cắt và thu nhỏ khuôn mặt về 64x64.
+* `detector/blazeface_esp32.py`: mô phỏng model tìm mặt BlazeFace trên laptop, giống hệt trên ESP32.
+* `recognizer/face_recognizer.py`: model nhận diện, tạo 128 số, so khớp lấy điểm cao nhất, và bộ đếm 3 ảnh chống nhiễu.
+* `database/db_manager.py`: lưu lịch sử điểm danh vào file SQLite, có chống ghi trùng trong 30 giây.
+* `ui/hud_renderer.py`: vẽ khung, tên, độ tin cậy lên cửa sổ laptop. **Không phải màn hình gắn trên ESP32.**
 
-### Tài liệu hướng dẫn ở gốc (Root Directory)
-*   `HUONG_DAN_COLAB_TRAIN_V3.md`: Hướng dẫn chuẩn 1-click train Model V3 trên Google Colab T4 GPU với dataset CASIA-WebFace `faces_webface_112x112.zip`.
-*   `colab.zip`: Gói mã nguồn đóng gói sẵn (~954KB) tự động upload lên Google Colab để train Model V3.
-*   `mo_ta_project.md`: Chính là file bạn đang đọc (Mô tả chi tiết kiến trúc và hợp đồng kỹ thuật).
-*   `README.md`: Roadmap + bảng thông số kỹ thuật + trạng thái tiến độ nghiệm thu.
-*   `kich_hoat_moi_truong.md`: Lệnh nhanh conda + flash + stream (nguồn chân lý vận hành).
-*   `ket_qua_esp32.txt`: Log test thực tế ESP32-S3 mới nhất đo trên phần cứng thật (chứng minh tốc độ `det: ~1.95s`, `rec: ~1.30s`, `cy: REUSE 1.32s`, nhận diện liên tục `nhien` score 0.80 - 0.84, chốt `SUCCESS nhien`, lưu SPIFFS `/attendance.csv`).
-*   ~~`HUONG_DAN_COLAB_TRAIN_V2.md`~~: Phiên bản cũ (đã được thay thế bởi V3).
+**Quy tắc để laptop và ESP32 giống nhau:**
 
----
-
-## 🚀 GIAI ĐOẠN 4: TỐI ƯU & VẬN HÀNH THỰC TẾ (khả thi với kiến trúc hiện tại)
-
-GĐ4 không thêm model lớn, chỉ **đo được + hiệu chuẩn + cứng hóa** trên đúng phần cứng N16R8, `ai_config.h` (Arena Detector 1MB + Recognizer 512KB PSRAM), TCP JPEG 128, HE bit-exact:
-
-*   **Tốc độ (Phase 4.1 - ĐÃ HOÀN THÀNH & NGHIỆM THU TRÊN PHẦN CỨNG THẬT):**
-    * Baseline ban đầu: `det: 20.3s`, `rec: 4.7s`.
-    * Tích hợp thành công kernel SIMD `esp-nn v1.3` chính thức của Espressif + xử lý bypass lỗi `s8pad` bằng `DwUseEspNn()`.
-    * Khóa xung nhịp CPU 2 nhân ở mức trần 240MHz.
-    * Triệt tiêu độ trễ hàng đợi mạng: Core 1 ghi đè ảnh liên tục, Core 0 lấy frame <50ms.
-    * Kết quả thực tế đo bằng `micros()` trên ESP32-S3 (`ket_qua_esp32.txt`): `det` đạt **~1.95s** (nhanh 10.5x), `rec` đạt **~1.30s** (nhanh 4x), chu kỳ Box-Reuse (`cy: REUSE`) đạt **~1.32s/frame**.
-*   **Chính xác & Hiệu chuẩn ngưỡng (Phase 4.2 - ĐÃ HOÀN THÀNH & HIỆU CHUẨN THỰC TẾ):**
-    * Ngưỡng toàn cục: `GLOBAL_THRESHOLD = 0.70` (đồng bộ `#define FACE_THRESHOLD 0.70f` trong `ai_config.h`).
-    * Ngưỡng từng người: `PER_ID_CAP = 0.75` (công thức `cross_max + 0.02`, floor 0.65, cap 0.75). Hiện tại cả 3 người dùng `nhien`, `thao`, `toan` đều có ngưỡng riêng 0.75 trong `face_database.h`.
-    * Nghiệm thu thực tế trên serial log ESP32-S3 (`ket_qua_esp32.txt`): điểm live thực tế của `nhien` dao động từ 0.79 – 0.84. Khung hình liên tục vượt ngưỡng 0.75, kích hoạt Temporal Voting (3 frame) chốt `SUCCESS nhien` và lưu SPIFFS `/attendance.csv`. Ngưỡng 0.75 giải quyết triệt để lỗi từ chối nhầm khi nghiêng mặt nhẹ ở ngưỡng 0.80 cũ.
-    * Đánh giá ngoại tuyến độc lập (`evaluate_model.py`): **Top-1 Identification Accuracy đạt 100.0%** (12/12 probe holdout, 20/20 toàn bộ ảnh đăng ký cho mỗi người), FRR@0.70 = 0.0%. Người lạ (<0.65) bị chặn an toàn.
-*   **Chống giả mạo nhẹ:** không dùng blink (thiếu landmark `blazeface_esp32.py:216`). Chọn LBP/variance trên `gray_eq` 64×64 + active quay đầu (EMA `cx` drift); ToF VL53L5C 8×8 là tuỳ chọn phần cứng, không tốn arena.
-*   **Vận hành:** NTP `configTime()` + SPIFFS epoch, enroll tại chỗ ghi SPIFFS JSON (16 templates MAX-SIM, không trung bình), OTA, leak test 24h `getFreeHeap`.
-*   **Kiểm thử:** matrix ≥10 người × 3 sáng × 3 khoảng cách + golden frame `README.md:274`; chuyển OV2640 trực tiếp là tuỳ chọn, giữ `ip_camera_streamer.py` cho debug.
-
-> Chi tiết Action Items xem `README.md:218-249` — GĐ4 đã chia thành 4.1 (tốc độ đo được - đã xong), 4.2 (hiệu chuẩn - đã xong), 4.3 (liveness nhẹ), 4.4 (NTP/enroll/OTA), 4.5 (field test + vỏ).
+1. Webcam được cắt vuông giữa rồi thu nhỏ về 128x128 (chỉ 1 lần).
+2. Nén JPEG chất lượng 80, gửi kèm độ dài, qua TCP cổng 12345.
+3. Laptop phải mô phỏng đúng bước chuyển màu RGB565 giống ESP32 trước khi xử lý.
+4. Model tìm mặt dùng cùng cách và cùng ngưỡng (0.80).
+5. Cắt khuôn mặt bằng đúng thuật toán, rồi chỉnh sáng đều (HE) giống hệt trên chip.
+6. Model nhận diện dùng cùng cách chuẩn hóa và cùng cách so khớp (lấy điểm cao nhất trong 16 mẫu).
+7. Ngưỡng: 0.70 chung, riêng từng người tối đa 0.75.
 
 ---
 
-## 💎 TÀI LIỆU LƯU TRỮ SOURCE CODE CỐT LÕI (BÍ QUYẾT BẢN QUYỀN)
+## Phần 3: `training_tinyml/` — Nơi huấn luyện AI và tạo dữ liệu
 
-Vì phần lớn mã nguồn đã được dọn dẹp theo yêu cầu, đây là những bí quyết công nghệ và các đoạn code cốt lõi (secret sauce) đã làm nên thành công của hệ thống này để bạn có thể tham khảo lại khi viết lại code từ đầu:
+Đây là nơi "dạy" AI và tạo ra model/dữ liệu mà laptop và chip cùng dùng.
 
-### 1. Bí quyết Khử Domain Shift (Unified BlazeFace Emulator)
-Bí quyết ở đây là Laptop phải mô phỏng đúng đường đi của ESP32: cùng JPEG, cùng biểu diễn RGB565 sau decode, cùng thuật toán Bilinear Interpolation trên ảnh 128x128 để cắt vùng mặt 64x64. Nếu Python dùng OpenCV `cv2.resize()` cho crop mặt thì có thể lệch pixel. Do đó, phải tự viết lại thuật toán crop trên Python và xác minh bằng golden frame:
-```python
-# Trích xuất từ blazeface_esp32.py (Python Emulator)
-def _crop_and_resize_bilinear_gray(img_bgr, cx, cy, box_size, target_size=64):
-    half_box = box_size / 2.0
-    x1_box, y1_box = cx - half_box, cy - half_box
-    scale = box_size / target_size
-    # Tính Bilinear từng pixel trên input đã mô phỏng RGB565, y hệt C++ thay vì dùng OpenCV resize
-    # ... (Chi tiết nội suy song tuyến)
-```
+**Cách hoạt động:** AI học đặc trưng khuôn mặt chung từ tập dữ liệu lớn **CASIA-WebFace** (hàng trăm nghìn ảnh). Có thầy (SFace) dạy trò (Ghost-TinyFace nhỏ gọn). Thêm người mới chỉ cần thu 20 ảnh, **không cần train lại**.
 
-### 2. Bí quyết Quy hoạch Bộ nhớ PSRAM ESP32-S3 (Hỗ trợ SIMD Scratch Buffer)
-Không bao giờ để TFLite tự cấp phát RAM (vì SRAM chỉ có 512KB). Phải ép cấp phát trên PSRAM (8MB) thông qua cờ `MALLOC_CAP_SPIRAM` với mức phân bổ chính xác đo được từ `export_config.py`. Với kernel SIMD esp-nn, Arena cần mở rộng vừa đủ để chứa scratch buffer căn chỉnh filter mà không làm phân mảnh heap cho WiFi/JPEG:
-```cpp
-// Trích xuất từ ai_face_recognizer.cpp
-// 512KB PSRAM cho Ghost-TinyFace INT8 để chứa scratch filter alignment của SIMD (thực tế kích thước activation chỉ ~187KB)
-#define RECOGNIZER_ARENA_SIZE (512 * 1024)
-uint8_t* raw_arena = (uint8_t*)heap_caps_malloc(RECOGNIZER_ARENA_SIZE + 16, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-```
+* `download_casia_dataset.py`: đọc dữ liệu CASIA-WebFace trực tiếp từ file zip, tách ra ảnh cho cả thầy và trò.
+* `train_distillation.py`: huấn luyện model trên Google Colab. Trò học bắt chước thầy, kèm kỹ thuật giúp phân biệt rõ người này với người khác và không bị ảnh hưởng bởi ánh sáng.
+* `quantize_qat_int8.py`: nén model nhận diện xuống INT8 (nhẹ, khoảng 160KB) và sinh file `model_data.h`.
+* `quantize_detector_int8.py`: nén model tìm mặt xuống INT8 (khoảng 183KB).
+* `generate_embeddings.py`: từ ảnh đã thu, tạo dữ liệu 128 số cho mỗi người (giữ 16 mẫu tốt nhất) và ghi ra `data/face_database.json` + `firmware_esp32/face_database.h`.
+* `update_face_database.py`: tự động chạy lại bước tạo dữ liệu khi thêm/xóa người. **Đây là cách thêm người mới, không cần train lại.**
+* `export_config.py`: sinh file `ai_config.h` (các thông số chung).
+* `evaluate_model.py`: kiểm tra, in ra các số liệu đánh giá (độ đúng, nhầm lẫn, ngưỡng).
+* `colab_exports/`: bản copy model/dữ liệu sinh ra trên Colab.
 
-### 3. Bí quyết Kiến trúc Đa luồng (RTOS Dual-Core) và Triệt Tiêu Độ Trễ Luồng Ảnh
-ESP32 có 2 nhân. Tránh để TCP/IP (mạng) và AI chạy chung nhân vì AI sẽ block toàn bộ mạng gây mất kết nối. Đồng thời, Core 1 phải liên tục giải mã và ghi đè ảnh mới nhất vào buffer thay vì chờ Core 0 rảnh:
-```cpp
-// Phân chia Task sau khi pipeline single-task đã được kiểm chứng
-xTaskCreatePinnedToCore(network_display_task, "NetTask", 8192, NULL, 4, &NetTaskHandle, 1); // Core 1: Wi-Fi/TCP/JPEG
-xTaskCreatePinnedToCore(ai_processing_task, "AITask", 32768, NULL, 5, &AITaskHandle, 0); // Core 0: TFLite
+---
 
-// Trích xuất từ wifi_udp_server.cpp (Core 1): Luôn ghi đè ảnh mới nhất, khử trễ 5s cũ
-xSemaphoreTake(image_mutex, portMAX_DELAY);
-memcpy(g_frame_buffer, payload_buffer, payload_len);
-is_new_frame_available = true;
-xSemaphoreGive(image_mutex);
-```
+## Phần 4: `data/` và tài liệu
 
-### 4. Bí quyết Loss Function (Knowledge Distillation)
-Trong file `train_distillation.py`, student Ghost-TinyFace học embedding từ teacher SFace bằng cosine loss, MSE trên vector đã normalize và hard-negative loss trong batch. Model không tự đảm bảo L2 norm ở output; bước inference phải L2-normalize trước matching:
-```python
-def distillation_loss(teacher_embeddings, student_embeddings):
-    # 1. Cosine Distance Loss (Ép góc vector giống nhau)
-    cos_loss = tf.reduce_mean(1.0 - tf.reduce_sum(teacher_embeddings * student_embeddings, axis=1))
-    # 2. Mean Squared Error (Ép độ lớn giống nhau)
-    mse_loss = tf.keras.losses.mean_squared_error(teacher_embeddings, student_embeddings)
-    # Hard-negative loss được tính riêng trong train_step và cộng với trọng số gamma.
-    return cos_loss + 0.5 * mse_loss
-```
+**Thư mục `data/`:**
+- `registered_faces/nhien|thao|toan/`: mỗi người 20 ảnh xám 64x64.
+- `face_database.json`: dữ liệu 128 số của 3 người.
+- `attendance.db`: lịch sử điểm danh (trên laptop).
 
-### 5. Bí quyết Rẽ nhánh Hybrid Ops (Khắc phục lỗi assembly s8pad của ESP-NN)
-Lớp `DepthwiseConv` 3x3 với `ch_mult == 1 && ch % 16 == 0` có lỗi sai số trên tập lệnh vector assembly `esp-nn v1.3`. Nhờ cơ chế rẽ nhánh kiểm tra cấu hình, ta cho cấu hình lỗi này chạy bằng kernel chuẩn TFLM Reference Op còn tất cả các lớp khác vẫn chạy SIMD cực nhanh:
-```cpp
-// Trích xuất từ firmware_esp32/esp_nn_glue.cpp
-static inline bool DwUseEspNn(const TfLiteDepthwiseConvParams* params, const TfLiteTensor* input, const TfLiteTensor* filter) {
-    int ch_mult = params->depth_multiplier;
-    int ch = filter->dims->data[3];
-    int filter_width = filter->dims->data[2];
-    int filter_height = filter->dims->data[1];
-    // Nhận diện chính xác cấu hình dính lỗi s8pad
-    if (ch_mult == 1 && (ch % 16) == 0 && filter_width == 3 && filter_height == 3) {
-        return false; // Fallback về Reference Op chuẩn -> maxdiff = 0
-    }
-    return true; // Dùng SIMD esp-nn tăng tốc tối đa
-}
-```
+**Tài liệu ở gốc project:**
+- `HUONG_DAN_COLAB_TRAIN_V3.md`: hướng dẫn train model V3 trên Colab.
+- `colab.zip`: gói code gửi lên Colab.
+- `mo_ta_project.md`: file bạn đang đọc.
+- `README.md`: giới thiệu tổng quan.
+- `kich_hoat_moi_truong.md`: các lệnh chạy nhanh.
+- `ket_qua_esp32.txt`: log chạy thật trên chip.
+- `HUONG_DAN_COLAB_TRAIN_V2.md`: bản cũ, đã thay bằng V3.
+
+---
+
+## Giai đoạn 4 (tối ưu và vận hành)
+
+Không thêm model mới, chỉ **đo lại, chỉnh lại cho tốt hơn** trên đúng phần cứng hiện có:
+
+- **Tốc độ (đã xong):** thêm bộ tăng tốc, khóa chip ở 240MHz, giảm độ trễ. Kết quả đo thật: tìm mặt ~1.95s, nhận diện ~1.30s.
+- **Độ chính xác và chọn ngưỡng (đã xong):** ngưỡng 0.70 chung, riêng từng người 0.75. Đo thật thấy nhận diện đúng liên tục.
+- **Còn làm:** chống giả mạo bằng ảnh in/màn hình; thêm giờ thật (NTP); nạp firmware không cần cáp (OTA), thu ảnh ngay trên chip; test thực tế với nhiều người và nhiều điều kiện sáng.
